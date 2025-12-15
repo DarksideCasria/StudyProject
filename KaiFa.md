@@ -1774,6 +1774,474 @@ os.environ.update(config_vars)
 
 
 
+## 5. 正则表达式
+
+### 1. 正则表达式基础概念
+
+#### 1.2 基本语法元素
+
+```
+.       匹配任意单个字符（除换行符）
+^       匹配字符串开头
+$       匹配字符串结尾
+*       匹配前一个字符0次或多次
++       匹配前一个字符1次或多次
+?       匹配前一个字符0次或1次
+|       或操作，匹配多个模式之一
+```
+
+### 2. 字符类与集合
+
+#### 2.1 字符集合
+
+```python
+[abc]     匹配a、b或c中的任意一个
+[a-z]     匹配a到z的任意小写字母
+[A-Z]     匹配A到Z的任意大写字母
+[0-9]     匹配0到9的任意数字
+[^abc]    匹配除a、b、c外的任意字符
+```
+
+#### 2.2 预定义字符类
+
+```python
+\d       匹配数字，等价于[0-9]
+\D       匹配非数字，等价于[^0-9]
+\w       匹配单词字符，等价于[a-zA-Z0-9_]
+\W       匹配非单词字符，等价于[^a-zA-Z0-9_]
+\s       匹配空白字符（空格、制表符、换行等）
+\S       匹配非空白字符
+```
+
+### 3. 量词与重复
+
+#### 3.1 基本量词
+
+```python
+*        0次或多次
++        1次或多次
+?        0次或1次
+{n}      恰好n次
+{n,}     至少n次
+{n,m}    n到m次
+```
+
+#### 3.2 贪婪 vs 非贪婪
+
+```python
+# 贪婪模式（默认）
+.*       匹配尽可能多的字符
+.+       匹配尽可能多的字符（至少1个）
+
+# 非贪婪模式（加?）
+.*?      匹配尽可能少的字符
+.+?      匹配尽可能少的字符（至少1个）
+```
+
+**示例对比**:
+
+```python
+text = "<div>content</div> <span>more</span>"
+
+# 贪婪模式
+re.findall(r"<.*>", text)  # 结果: ['<div>content</div> <span>more</span>']
+
+# 非贪婪模式
+re.findall(r"<.*?>", text)  # 结果: ['<div>', '</div>', '<span>', '</span>']
+```
+
+### 4. 分组与捕获
+
+#### 4.1 分组语法
+
+```python
+( )          创建捕获组
+(?: )        创建非捕获组
+(?P<name>)   命名捕获组
+```
+
+#### 4.2 分组应用
+
+```python
+# 基本分组
+pattern = r"(\d{3})-(\d{4})"
+text = "电话: 123-4567"
+match = re.search(pattern, text)
+if match:
+    print(match.group(1))  # 123
+    print(match.group(2))  # 4567
+
+# 命名分组
+pattern = r"(?P<area>\d{3})-(?P<number>\d{4})"
+match = re.search(pattern, text)
+if match:
+    print(match.group('area'))    # 123
+    print(match.group('number'))  # 4567
+```
+
+### 5. 核心函数详解
+
+#### 5.1 `re.findall(pattern, string, flags=0)`
+
+**功能**: 查找所有匹配的子串
+**返回**: 匹配字符串的列表
+**特点**: 
+
+- 无匹配时返回空列表 `[]`
+- 如果模式中有分组，返回分组内容的元组列表
+
+```python
+# 基本用法
+text = "价格: $10, $20, $30"
+prices = re.findall(r'\$\d+', text)  # ['$10', '$20', '$30']
+
+# 分组时的行为
+text = "姓名: 张三, 年龄: 25"
+results = re.findall(r'(\w+):\s*(\w+)', text)  
+# [('姓名', '张三'), ('年龄', '25')]
+```
+
+#### 5.2 `re.sub(pattern, repl, string, count=0, flags=0)`
+
+**功能**: 替换匹配的子串
+**返回**: 替换后的新字符串
+**参数**:
+- `repl`: 可以是字符串或函数
+- `count`: 最大替换次数（0=全部）
+
+```python
+# 字符串替换
+text = "今天是2024-01-15"
+new_text = re.sub(r'\d{4}-\d{2}-\d{2}', '日期', text)
+
+# 函数替换
+def double(match):
+    return str(int(match.group()) * 2)
+
+text = "数字: 5 和 10"
+result = re.sub(r'\d+', double, text)  # "数字: 10 和 20"
+
+# 使用反向引用
+text = "hello world"
+result = re.sub(r'(\w+) (\w+)', r'\2 \1', text)  # "world hello"
+```
+
+#### 5.3 其他重要函数
+
+```python
+# re.search() - 查找第一个匹配
+match = re.search(r'\d+', "abc 123 def")
+if match:
+    print(match.group())  # 123
+
+# re.match() - 从字符串开头匹配
+match = re.match(r'\d+', "123 abc")
+if match:
+    print(match.group())  # 123
+
+# re.finditer() - 返回迭代器
+for match in re.finditer(r'\d+', "a1 b2 c3"):
+    print(match.group())  # 1, 2, 3
+
+# re.split() - 按模式分割
+parts = re.split(r'\d+', "a1b2c3")  # ['a', 'b', 'c', '']
+```
+
+### 6. 标志(Flags)参数
+
+```python
+re.IGNORECASE 或 re.I   忽略大小写
+re.MULTILINE 或 re.M    多行模式
+re.DOTALL 或 re.S       让.匹配包括换行符的所有字符
+re.ASCII 或 re.A        让\w, \W, \b, \B, \d, \D匹配ASCII字符
+re.VERBOSE 或 re.X      允许在正则表达式中添加注释和空白
+```
+
+**使用示例**:
+
+```python
+# 忽略大小写
+re.findall(r'hello', 'Hello WORLD', re.IGNORECASE)  # ['Hello']
+
+# 多行模式
+text = "第一行\n第二行\n第三行"
+re.findall(r'^第', text, re.MULTILINE)  # ['第', '第']
+
+# 详细模式（可读性更好）
+pattern = re.compile(r"""
+    \d{3}    # 区号
+    -        # 分隔符
+    \d{4}    # 号码
+""", re.VERBOSE)
+```
+
+### 7. 编译正则表达式
+
+#### 7.1 使用 `re.compile()`
+
+```python
+# 编译模式，提高重复使用效率
+pattern = re.compile(r'\d{3}-\d{4}')
+
+# 使用编译后的模式
+result1 = pattern.findall("电话: 123-4567")
+result2 = pattern.sub("XXX-XXXX", "电话: 123-4567")
+```
+
+#### 7.2 性能优势
+
+- **一次编译，多次使用**
+- **提高执行效率**，特别在循环中
+- **代码更清晰**
+
+### 8. 实际应用模式
+
+#### 8.1 邮箱验证
+
+```python
+email_pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
+def is_valid_email(email):
+    return bool(re.match(email_pattern, email))
+```
+
+#### 8.2 URL提取
+
+```python
+url_pattern = r'https?://[^\s]+'
+text = "访问 https://example.com 和 http://test.org"
+urls = re.findall(url_pattern, text)
+```
+
+#### 8.3 电话号码格式化
+
+```python
+def format_phone(phone):
+    return re.sub(r'(\d{3})(\d{4})(\d{4})', r'\1-\2-\3', phone)
+
+format_phone("13800138000")  # "138-0013-8000"
+```
+
+#### 8.4 HTML标签处理
+
+```python
+def remove_html_tags(html):
+    return re.sub(r'<.*?>', '', html)
+
+def get_html_tags(html):
+    return re.findall(r'<(\w+)[^>]*>', html)
+```
+
+### 9. 在Tokenizer中的具体应用
+
+#### 9.1 原始代码分析
+
+```python
+def tokenizer(text):
+    # 1. 移除HTML标签（非贪婪匹配）
+    text = re.sub(r"<.*?>", " ", text)
+    
+    # 2. 只保留字母字符
+    text = re.sub(r"[^a-zA-Z]", " ", text)
+    
+    # 3. 转换为小写并分割
+    return text.lower().split()
+```
+
+#### 9.2 逐步处理示例
+
+```python
+输入: "<div>Hello, World! 123</div>"
+
+步骤1后: " Hello, World! 123 "
+步骤2后: " Hello  World   "
+步骤3后: ['hello', 'world']
+```
+
+#### 9.3 替代实现方案
+
+```python
+# 方案1: 使用findall提取单词
+def tokenizer_v2(text):
+    text = re.sub(r"<.*?>", " ", text)
+    words = re.findall(r'[a-zA-Z]+', text)
+    return [word.lower() for word in words]
+
+# 方案2: 更严格的清理
+def tokenizer_v3(text):
+    # 移除HTML标签、数字、标点
+    text = re.sub(r"<.*?>", " ", text)
+    text = re.sub(r"[^a-zA-Z\s]", "", text)
+    # 合并多个空格
+    text = re.sub(r"\s+", " ", text)
+    return text.lower().strip().split()
+```
+
+### 10. 常见陷阱与最佳实践
+
+#### 10.1 常见错误
+
+```python
+# 错误: 忘记转义特殊字符
+re.findall(r'1.0', '1a0 1.0')  # 匹配 '1a0' 和 '1.0'
+re.findall(r'1\.0', '1a0 1.0') # 只匹配 '1.0'
+
+# 错误: 贪婪匹配导致意外结果
+re.sub(r'"*"', '', '"text" "more"')  # 错误用法
+re.sub(r'"[^"]*"', '', '"text" "more"')  # 正确用法
+```
+
+#### 10.2 最佳实践
+
+1. **使用原始字符串**: `r"pattern"` 避免转义问题
+2. **编译重复使用的模式**: 提高性能
+3. **合理使用非贪婪匹配**: 避免过度匹配
+4. **测试边界情况**: 空字符串、特殊字符等
+5. **考虑性能**: 复杂正则可能影响性能
+
+#### 10.3 调试技巧
+
+```python
+import re
+
+def debug_regex(pattern, text):
+    print(f"模式: {pattern}")
+    print(f"文本: {text}")
+    matches = re.findall(pattern, text)
+    print(f"匹配: {matches}")
+    print("-" * 40)
+
+# 测试不同情况
+debug_regex(r'\d+', "abc 123 def 456")
+debug_regex(r'[a-z]+', "Hello World 123")
+```
+
+### 11. 进阶主题
+
+#### 11.1 前后查找
+
+```python
+# 正向肯定前后查找
+(?=...)     # 正向肯定前瞻
+(?!...)     # 正向否定前瞻
+(?<=...)    # 正向肯定后顾
+(?<!...)    # 正向否定后顾
+
+# 示例: 匹配后面不是数字的字母
+re.findall(r'[a-z]+(?!\d)', 'abc123 def')  # ['def']
+```
+
+#### 11.2 条件匹配
+
+```python
+# 语法: (?(id/name)yes-pattern|no-pattern)
+pattern = r'(\()?\d{3}(?(1)\)|-)-\d{4}'
+# 匹配: (123)-4567 或 123-4567
+```
+
+#### 11.3 递归模式
+
+```python
+# 匹配嵌套括号
+pattern = r'\(([^()]|(?R))*\)'
+```
+
+### 12. 性能优化
+
+#### 12.1 高效模式设计
+
+```python
+# 不好: 使用.*过度匹配
+r'<div>.*</div>'
+
+# 更好: 使用更精确的模式
+r'<div>[^<]*</div>'
+
+# 最好: 使用非贪婪匹配
+r'<div>.*?</div>'
+```
+
+#### 12.2 避免回溯灾难
+
+```python
+# 可能引起灾难性回溯的模式
+r'(a+)+b'  # 对字符串"aaaaaaaaac"会大量回溯
+
+# 改进版本
+r'a+b'     # 更高效
+```
+
+这个完整的知识点总结涵盖了从基础到进阶的正则表达式概念，特别聚焦于Python中的`re`模块应用。掌握这些知识点将帮助你高效处理各种文本处理任务。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -10089,6 +10557,375 @@ userMsgIdToRepliesMap.putAll(
 ✔ 代码完全正确
 ```
 
+#### 2.2 @ConfigurationProperties(prefix = "gb.auth")和@Configuration和@EnableConfigurationProperties区别
+
+
+
+##### 核心区别总结
+
+| 注解                                 | 作用               | 层级                     | 主要目的                                                     |
+| :----------------------------------- | :----------------- | :----------------------- | :----------------------------------------------------------- |
+| **`@Configuration`**                 | **标记类为配置类** | 类级别                   | 标识这个类是一个基于Java的配置类，其中可能包含用`@Bean`定义的Bean。它是组件扫描的候选对象。 |
+| **`@ConfigurationProperties`**       | **绑定外部配置**   | 类级别                   | 将配置文件（如`.properties`或`.yml`）中的属性，尤其是带有特定前缀的属性，批量绑定到一个Java Bean上。**它本身不注册这个Bean**。 |
+| **`@EnableConfigurationProperties`** | **启用并注册**     | 类级别（通常用于配置类） | 1. **启用** `@ConfigurationProperties` 的功能。 2. **注册** 被它列出的 `@ConfigurationProperties` 类为标准的Spring Bean。 |
+
+---
+
+##### 详细解释与使用场景
+
+###### 1. `@Configuration`
+
+- **是什么**： 源自Spring框架核心，用于定义一个**配置类**，替代传统的XML配置文件。Spring容器会处理这个类，并从中获取Bean的定义。
+- **做什么**： 类中被`@Bean`注解的方法会被Spring调用，其返回值将被注册到Spring应用上下文中作为一个Bean。
+- **如何使用**：
+    ```java
+    @Configuration
+    public class MyConfig {
+        
+        @Bean
+        public MyService myService() {
+            return new MyServiceImpl();
+        }
+    }
+    ```
+
+###### 2. `@ConfigurationProperties`
+
+- **是什么**： 源自Spring Boot，用于**外部化配置**。它让你能够将一组相关的配置属性（例如，以`gb.auth`开头的所有属性）映射到一个类型安全的Java Bean上。
+- **做什么**： 它负责**绑定**属性。但请注意，仅仅使用这个注解，这个配置类还**不是**Spring容器中的一个Bean，你无法在其他地方通过`@Autowired`注入它。
+- **如何使用**：
+    ```java
+    // 注意：这里没有使用 @Component
+    @ConfigurationProperties(prefix = "gb.auth")
+    public class GbAuthProperties {
+        private String username;
+        private String password;
+        private int timeout;
+        
+        // 标准的 Getter 和 Setter 是必须的！
+        public String getUsername() { return username; }
+        public void setUsername(String username) { this.username = username; }
+        
+        // ... 其他 getter 和 setter
+    }
+    ```
+    对应的 `application.yml`:
+    ```yaml
+    gb:
+      auth:
+        username: "admin"
+        password: "secret123"
+        timeout: 3000
+    ```
+
+###### 3. `@EnableConfigurationProperties`
+
+- **是什么**： 这是一个**启用开关**。它通常用在你的主配置类或者任何一个`@Configuration`类上。
+- **做什么**：
+    1.  它激活了Spring Boot对`@ConfigurationProperties`的后处理机制（即属性绑定和验证）。
+    2.  它**显式地**将你在注解中列出的类注册为Spring Bean。这样，你就可以在应用的其他地方注入它们了。
+- **如何使用**：
+  
+    ```java
+    @Configuration
+    // 关键！这行代码完成了两件事：
+    // 1. 启用配置属性绑定功能
+    // 2. 将 GbAuthProperties 这个类注册为一个Bean
+    @EnableConfigurationProperties(GbAuthProperties.class)
+    public class MyAppConfig {
+        // 其他 @Bean 定义...
+    }
+    ```
+    现在，你可以在其他地方注入 `GbAuthProperties`：
+    ```java
+    @Service
+    public class AuthService {
+        
+        private final GbAuthProperties authProperties;
+        
+        // 通过构造器注入
+        public AuthService(GbAuthProperties authProperties) {
+            this.authProperties = authProperties;
+        }
+        
+        public void doAuth() {
+            String username = authProperties.getUsername();
+            String password = authProperties.getPassword();
+            // ... 使用这些配置
+        }
+    }
+    ```
+
+---
+
+##### 组合使用与演进
+
+实际上，Spring Boot为了让开发更便捷，不断在简化配置。
+
+**方式一：显式启用（经典方式）**
+如上例所示，使用 `@Configuration` + `@EnableConfigurationProperties(XxxProperties.class)`。这种方式非常清晰，明确地指出了哪些配置属性类被启用。
+
+**方式二：隐式注册（更简洁的方式）**
+如果你给`@ConfigurationProperties`标注的类**再加上`@Component`**（或其他派生注解如`@Service`），那么它就会被组件扫描自动发现并注册为Bean。这样就不再需要`@EnableConfigurationProperties`了。
+
+```java
+@Component // 加上这个注解，它就会被扫描到
+@ConfigurationProperties(prefix = "gb.auth")
+public class GbAuthProperties {
+    // ... 字段和getter/setter
+}
+```
+此时，你不需要在任何地方写`@EnableConfigurationProperties(GbAuthProperties.class)`，它已经是一个可以被注入的Bean了。
+
+**方式三：在启动类上启用**
+你可以在主应用类上使用`@EnableConfigurationProperties`来启用特定的属性类。
+
+```java
+@SpringBootApplication
+@EnableConfigurationProperties({GbAuthProperties.class, AnotherProperties.class})
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+```
+
+##### 总结
+
+- **`@Configuration`**： 声明一个类是配置的源头。
+- **`@ConfigurationProperties`**： 声明一个类是用于**接收**配置属性的“容器”，但它不负责把自己变成Bean。
+- **`@EnableConfigurationProperties`**： 负责**激活**绑定功能，并把指定的`@ConfigurationProperties`类**变成Bean**。
+
+它们三者通常协同工作，但`@ConfigurationProperties`类也可以通过`@Component`自己完成注册，从而摆脱对`@EnableConfigurationProperties`的依赖。选择哪种方式取决于你的项目风格和是否需要显式控制。
+
+
+
+
+
+
+
+#### 2.3 Jwt基础
+
+##### 🧩 JWT 的三部分结构
+
+
+
+```
+header.payload.signature
+```
+
+
+
+###### 1. **Header（头部）**
+
+- 包含令牌的元数据
+- 通常包括令牌类型和签名算法
+- 示例：
+
+
+
+```
+{
+  "alg": "HS256",  // 签名算法
+  "typ": "JWT"     // 令牌类型
+}
+```
+
+
+
+###### 2. **Payload（载荷）**
+
+- 包含实际要传递的数据（声明）
+- 可以包含预定义声明和自定义数据
+- 示例：
+
+
+
+```
+{
+  "sub": "1234567890",      // 用户ID
+  "name": "张三",
+  "iat": 1516239022,        // 签发时间
+  "exp": 1516242622         // 过期时间
+}
+```
+
+
+
+###### 3. **Signature（签名）**
+
+- 用于验证令牌的完整性和真实性
+- 计算公式：
+
+
+
+```
+HMACSHA256(
+  base64UrlEncode(header) + "." + 
+  base64UrlEncode(payload),
+  secret
+)
+```
+
+
+
+
+
+##### 🚀 二、你的 JWT 使用的是 **RS256（非对称加密签名）**
+
+JWT 有两类签名方式：
+
+| 类型      | 算法        | 特点                                     |
+| --------- | ----------- | ---------------------------------------- |
+| **HS256** | HMAC-SHA256 | 对称加密，前后端共享一个 secret          |
+| **RS256** | RSA-SHA256  | **非对称加密，后端用私钥签名，公钥验证** |
+
+你的项目使用 **RS256**：
+
+```
+this.jwtSigner = JWTSignerUtil.createSigner("rs256", keyPair);
+```
+
+因为你传入的是一个 `KeyPair`（公钥、私钥对），Hutool 就会自动使用 RSA 私钥进行签名。
+
+###### 优点：
+
+- 前端无法伪造 Token（因为没有私钥）
+- 可以安全地把公钥给其他微服务验证 Token
+- 安全性远高于 HS256
+
+
+
+
+
+
+
+
+
+##### 项目中的公钥和私钥来自哪里？
+
+答案：
+ 来自 **JKS 密钥库（keystore）文件**。
+
+在你的配置类：
+
+```
+KeyStoreKeyFactory keyStoreKeyFactory =
+        new KeyStoreKeyFactory(
+                properties.getLocation(),
+                properties.getPassword().toCharArray());
+return keyStoreKeyFactory.getKeyPair(
+                properties.getAlias(),
+                properties.getPassword().toCharArray());
+```
+
+这里做了两件事：
+
+1. **加载 JKS 文件（.jks）**
+2. **取出某个 alias 对应的 KeyPair —— KeyPair 包含两个东西：私钥 + 公钥**
+
+也就是：
+
+```
+KeyPair = { PublicKey + PrivateKey }
+```
+
+
+
+
+
+#### 2.4 SpringMVC和网关拦截器
+
+##### 1. 工作层次不同
+
+- **SpringMVC拦截器**：工作在单个微服务内部，拦截的是到达特定服务Controller前的请求
+- **网关拦截器**：工作在整个微服务集群的入口处，拦截所有进入系统的外部请求
+
+##### 2. 实现接口不同
+
+- **SpringMVC拦截器**：实现`org.springframework.web.servlet.HandlerInterceptor`接口
+- **网关拦截器**：实现`org.springframework.cloud.gateway.filter.GlobalFilter`接口
+
+##### 3. 处理模型不同
+
+- **SpringMVC拦截器**：基于传统的Servlet同步阻塞模型，使用ThreadLocal存储请求上下文
+- **网关拦截器**：基于Spring WebFlux的响应式异步非阻塞模型，返回Mono类型
+
+##### 4. 功能定位不同
+
+- **SpringMVC拦截器**：主要负责单个服务内的请求处理，如用户身份验证、日志记录、请求参数处理等
+- **网关拦截器**：主要负责全局功能，如统一认证授权、路由转发、限流熔断、协议转换等
+
+##### 5. 执行时机不同
+
+- **SpringMVC拦截器**：在请求已经路由到具体服务后执行
+- **网关拦截器**：在请求还未路由到具体服务前执行，是请求进入系统的第一道关卡
+
+##### 6. 影响范围不同
+
+- **SpringMVC拦截器**：只影响所在服务的请求
+- **网关拦截器**：影响所有经过网关的请求，覆盖整个微服务集群
+
+##### 7. 异常处理方式不同
+
+- **SpringMVC拦截器**：通常使用try-catch或全局异常处理器
+- **网关拦截器**：使用响应式编程的错误处理机制，如onErrorResume等
+
+##### 8. 在项目中的具体体现
+
+从项目代码中可以看到：
+
+1. **SpringMVC拦截器示例**（admin-service中的LoginInterceptor）：
+   - 工作在admin-service内部
+   - 实现了HandlerInterceptor接口
+   - 使用ThreadLocal存储用户信息
+   - 主要用于验证请求的JWT令牌
+2. **网关拦截器示例**（guestbook-gateway中的AuthGlobalFilter）：
+   - 工作在网关层
+   - 实现了GlobalFilter和Ordered接口
+   - 使用响应式编程模型
+   - 负责全局的认证授权和用户信息传递
+
+
+
+#### 2.5 拦截器工作
+
+**到达服务拦截器都是MVC拦截器，特殊的是1自己发送后又自己拦截一遍的feign转发时的拦截和2网关的拦截，如下：**
+
+
+
+**工作流程详解：**
+
+1. **发送阶段**：当服务A通过Feign调用服务B时，`DefaultFeignConfig.java`中的拦截器会：
+   - 从UserContext获取当前用户ID
+   - 将用户ID添加到请求头的"userInfo"字段
+2. **接收阶段**：当请求到达服务B时，UserInfoInterceptor会：
+   - 从请求头提取"userInfo"值
+   - 将提取的值转换为Integer类型。
+   - 存入UserContext的ThreadLocal中
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -11780,6 +12617,338 @@ public class DynamicRouteLoader {
 
 
 
+## 3. 微服务保护和分布式事物
+
+### 3.1 雪崩问题
+
+#### 1.简介
+
+![image-20251130213813944](../AppData/Roaming/Typora/typora-user-images/image-20251130213813944.png)
+
+#### 2. 产生原因和解决
+
+![image-20251130213929356](../AppData/Roaming/Typora/typora-user-images/image-20251130213929356.png)
+
+##### 2.1 请求限流
+
+![image-20251130214622540](../AppData/Roaming/Typora/typora-user-images/image-20251130214622540.png)
+
+
+
+##### 2.2 线程隔离
+
+![image-20251130214922894](../AppData/Roaming/Typora/typora-user-images/image-20251130214922894.png)
+
+##### 2.3 服务熔断
+
+![image-20251130215331430](../AppData/Roaming/Typora/typora-user-images/image-20251130215331430.png)
+
+### 3.2 服务保护技术
+
+#### 1. 简介
+
+![image-20251130215703427](../AppData/Roaming/Typora/typora-user-images/image-20251130215703427.png)
+
+#### 2. 知识点
+
+##### 2.1 簇点线路
+
+![image-20251130233937846](../AppData/Roaming/Typora/typora-user-images/image-20251130233937846.png)
+
+![image-20251130234052043](../AppData/Roaming/Typora/typora-user-images/image-20251130234052043.png)
+
+##### 2.2 sentinel启动
+
+```Shell
+java -Dserver.port=8090 -Dcsp.sentinel.dashboard.server=localhost:8090 -Dproject.name=sentinel-dashboard -jar sentinel-dashboard.jar
+```
+
+#### 3. 各种保护技术
+
+##### 3.1 直接用控制台
+
+不解释
+
+##### 3.2 Fallback
+
+![image-20251201215732861](../AppData/Roaming/Typora/typora-user-images/image-20251201215732861.png)
+
+###### 步骤一
+
+![image-20251201220343717](../AppData/Roaming/Typora/typora-user-images/image-20251201220343717.png)
+
+###### 步骤二
+
+![image-20251201220517411](../AppData/Roaming/Typora/typora-user-images/image-20251201220517411.png)
+
+##### 3.3 服务熔断
+
+![image-20251201225400799](../AppData/Roaming/Typora/typora-user-images/image-20251201225400799.png)
+
+![image-20251201230411235](../AppData/Roaming/Typora/typora-user-images/image-20251201230411235.png)
+
+
+
+### 3.3 分布式事务
+
+#### 1. 简介
+
+![image-20251204220531958](../AppData/Roaming/Typora/typora-user-images/image-20251204220531958.png)
+
+#### 2. 解决思路
+
+##### 2.1 seata
+
+![image-20251204223339599](../AppData/Roaming/Typora/typora-user-images/image-20251204223339599.png)
+
+##### 2.2 微服务集成seata
+
+
+
+![image-20251207214332708](../AppData/Roaming/Typora/typora-user-images/image-20251207214332708.png)
+
+![image-20251207214308240](../AppData/Roaming/Typora/typora-user-images/image-20251207214308240.png)
+
+##### 2.3 XA模式
+
+![image-20251209130342954](../AppData/Roaming/Typora/typora-user-images/image-20251209130342954.png)
+
+![image-20251209130553126](../AppData/Roaming/Typora/typora-user-images/image-20251209130553126.png)
+
+**如何实现**
+
+![image-20251209130651072](../AppData/Roaming/Typora/typora-user-images/image-20251209130651072.png)
+
+**锁在哪里？**
+
+在XA模式中，**锁是由数据库（RM）自动管理的**，而不是由事务协调器（TC）或应用显式控制。具体体现在：
+
+1. **一阶段执行SQL时**（步骤1.8~1.14）：
+   - 当RM执行“执行业务SQL”时，数据库会自动对涉及的数据行加锁（如行锁、表锁等）。
+   - 这些锁会一直持有，直到事务提交或回滚。
+2. **一阶段不提交**：
+   - 事务执行后不提交，锁会持续占用，防止其他事务修改相同数据。
+3. **二阶段提交或回滚时**：
+   - 当TC通知RM提交或回滚后，数据库才会释放这些锁。
+
+##### 2.4 AT模式
+
+![image-20251209134354334](../AppData/Roaming/Typora/typora-user-images/image-20251209134354334.png)
+
+###### 如何实现
+
+![image-20251209134650171](../AppData/Roaming/Typora/typora-user-images/image-20251209134650171.png)
+
+##### 2.5 模式区别
+
+![image-20251209134528841](../AppData/Roaming/Typora/typora-user-images/image-20251209134528841.png)
+
+
+
+## 4. MQ入门
+
+### 4.1 简介
+
+#### 1. 为什么使用
+
+提高异步效率
+
+![image-20251210155402619](../AppData/Roaming/Typora/typora-user-images/image-20251210155402619.png)
+
+#### 2. 同步调用优缺点
+
+![image-20251210160213954](../AppData/Roaming/Typora/typora-user-images/image-20251210160213954.png)
+
+![image-20251210160234951](../AppData/Roaming/Typora/typora-user-images/image-20251210160234951.png)
+
+#### 3. 异步调用
+
+![image-20251210162433960](../AppData/Roaming/Typora/typora-user-images/image-20251210162433960.png)
+
+##### 优势
+
+![image-20251210163038907](../AppData/Roaming/Typora/typora-user-images/image-20251210163038907.png)
+
+##### 缺点
+
+![image-20251210163520753](../AppData/Roaming/Typora/typora-user-images/image-20251210163520753.png)
+
+#### 4. MQ技术选型
+
+**![image-20251210170538521](../AppData/Roaming/Typora/typora-user-images/image-20251210170538521.png)**
+
+#### 5. 整体架构
+
+![image-20251210181322582](../AppData/Roaming/Typora/typora-user-images/image-20251210181322582.png)
+
+#### 6. 数据隔离
+
+![image-20251213193751128](../AppData/Roaming/Typora/typora-user-images/image-20251213193751128.png)
+
+### 4.2 Java使用RabbitMQ
+
+#### 1. AMQP框架
+
+![image-20251213200336922](../AppData/Roaming/Typora/typora-user-images/image-20251213200336922.png)
+
+#### 2. 使用步骤
+
+**声明交换机在消费者那里写**
+
+##### 2.1 依赖
+
+![image-20251213213340935](../AppData/Roaming/Typora/typora-user-images/image-20251213213340935.png)
+
+##### 2.2 配置
+
+![image-20251213213445094](../AppData/Roaming/Typora/typora-user-images/image-20251213213445094.png)
+
+##### 2.3 发送消息
+
+![image-20251213213807823](../AppData/Roaming/Typora/typora-user-images/image-20251213213807823.png)
+
+##### 2.4 接收消息
+
+![image-20251213214602508](../AppData/Roaming/Typora/typora-user-images/image-20251213214602508.png)
+
+#### 3. workQueue模型
+
+开多个会平均分配请求，并且不对处理速度，只是单纯对半分（每个consumer无法收到所有信息，只能对半）
+
+![image-20251213234847263](../AppData/Roaming/Typora/typora-user-images/image-20251213234847263.png)
+
+
+
+##### 解决方法
+
+![image-20251213235352303](../AppData/Roaming/Typora/typora-user-images/image-20251213235352303.png)
+
+##### 代码
+
+![image-20251214112851156](../AppData/Roaming/Typora/typora-user-images/image-20251214112851156.png)
+
+![image-20251214112949043](../AppData/Roaming/Typora/typora-user-images/image-20251214112949043.png)
+
+##### 总结
+
+![image-20251213235519011](../AppData/Roaming/Typora/typora-user-images/image-20251213235519011.png)
+
+
+
+#### 4. Fanout交换机
+
+功能：能将收到的消息转发给下游所有绑定队列
+
+![image-20251214112250841](../AppData/Roaming/Typora/typora-user-images/image-20251214112250841.png)
+
+![image-20251214112431003](../AppData/Roaming/Typora/typora-user-images/image-20251214112431003.png)
+
+##### 代码
+
+![image-20251214113323698](../AppData/Roaming/Typora/typora-user-images/image-20251214113323698.png)
+
+
+
+#### 5. direct交换机
+
+##### 功能
+
+![image-20251214113932388](../AppData/Roaming/Typora/typora-user-images/image-20251214113932388.png)
+
+##### 思路
+
+![image-20251214114330937](../AppData/Roaming/Typora/typora-user-images/image-20251214114330937.png)
+
+##### 代码
+
+![image-20251214114438207](../AppData/Roaming/Typora/typora-user-images/image-20251214114438207.png)
+
+![image-20251214114453311](../AppData/Roaming/Typora/typora-user-images/image-20251214114453311.png)
+
+![image-20251214114610281](../AppData/Roaming/Typora/typora-user-images/image-20251214114610281.png)
+
+#### 6. topic交换机
+
+##### 功能
+
+![image-20251214153536763](../AppData/Roaming/Typora/typora-user-images/image-20251214153536763.png)
+
+#### 7. 声明队列交换机
+
+![image-20251214154354977](../AppData/Roaming/Typora/typora-user-images/image-20251214154354977.png)
+
+##### 最笨的代码
+
+![image-20251214160020618](../AppData/Roaming/Typora/typora-user-images/image-20251214160020618.png)
+
+##### 最方便的代码
+
+![image-20251214162036073](../AppData/Roaming/Typora/typora-user-images/image-20251214162036073.png)
+
+#### 8. 消息转换器
+
+##### 问题
+
+![image-20251214164755989](../AppData/Roaming/Typora/typora-user-images/image-20251214164755989.png)
+
+
+
+##### 推荐方法
+
+![image-20251214164837547](../AppData/Roaming/Typora/typora-user-images/image-20251214164837547.png)
+
+
+
+
+
+## 5. MQ高级
+
+### 5.1 发送者的可靠性
+
+#### 1. 发送者重连
+
+**方法：**
+
+![image-20251215132735103](../AppData/Roaming/Typora/typora-user-images/image-20251215132735103.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -12148,6 +13317,152 @@ git remote set-url origin ssh://git@ssh.github.com:443/DarksideCasria/Scrapy_NCB
 
 
 
+## 第一次推送方法
+
+下面给你一个**从零开始，第一次推送到 GitHub 仓库 `git@github.com:DarksideCasria/hmall.git` 的完整流程**，非常清晰，照着做就 100% 成功。
+
+------
+
+### ✅ **第一次推送到 GitHub（SSH 模式）完整步骤**
+
+你要推送到：
+
+```
+git@github.com:DarksideCasria/hmall.git
+```
+
+我们假设你本地已经有一个项目文件夹，例如：
+
+```
+D:/hmall
+```
+
+------
+
+### **步骤 1：检查自己是否已有 SSH Key（必须）**
+
+打开 Git Bash：
+
+```bash
+ls ~/.ssh
+```
+
+如果能看到：
+
+- `id_rsa`
+- `id_rsa.pub`
+
+说明已有 SSH Key，可跳过生成步骤。
+
+------
+
+### **步骤 2：没有 SSH Key 就生成一个**
+
+```bash
+ssh-keygen -t rsa -b 4096 -C "你的邮箱"
+```
+
+一路回车即可。
+
+生成后查看公钥：
+
+```bash
+cat ~/.ssh/id_rsa.pub
+```
+
+复制里面的全部内容。
+
+------
+
+### **步骤 3：把 SSH 公钥添加到 GitHub**
+
+进入 GitHub：
+
+1. 右上角头像 → Settings
+2. 左侧 → **SSH and GPG keys**
+3. 点击 **New SSH key**
+4. 把上面的内容粘贴进去
+5. 保存
+
+测试是否成功：
+
+```bash
+ssh -T git@github.com
+```
+
+成功会提示：
+
+```
+Hi DarksideCasria! You've successfully authenticated...
+```
+
+------
+
+### **步骤 4：初始化你的本地项目（如果还没初始化）**
+
+进入你的项目：
+
+```bash
+cd D:/hmall
+```
+
+初始化 git：
+
+```bash
+git init
+```
+
+------
+
+### **步骤 5：添加远程仓库**
+
+```bash
+git remote add origin git@github.com:DarksideCasria/hmall.git
+```
+
+确认是否添加成功：
+
+```bash
+git remote -v
+```
+
+------
+
+### **步骤 6：第一次提交**
+
+```bash
+git add .
+git commit -m "initial commit"
+```
+
+------
+
+### **步骤 7：第一次推送（重点！！）**
+
+GitHub 默认分支现在是 `main`，所以第一次推送：
+
+```bash
+git push -u origin main
+```
+
+如果 GitHub 上是 `master` 分支，则改成：
+
+```bash
+git push -u origin master
+```
+
+------
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -12478,3 +13793,4 @@ nacos-registry.cn-hangzhou.cr.aliyuncs.com/nacos/nacos-server:v2.4.3
 
 
 
+a
