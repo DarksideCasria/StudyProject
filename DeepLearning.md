@@ -1,6 +1,6 @@
-# PyTorch基础
+# 基础
 
-## 1.基础
+## 1. pytorch基础
 
 ### 1.1隐藏层用Sequential的定义方式（更简单）
 
@@ -219,7 +219,7 @@ delta_w = [
 
 
 
-
+## 3. 
 
 
 
@@ -1785,6 +1785,56 @@ res = collection.query(
 #### 1.5 深层理解
 
 ![image-20250209163459471](../AppData/Roaming/Typora/typora-user-images/image-20250209163459471.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

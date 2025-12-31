@@ -11380,6 +11380,157 @@ com.hmall.security.config.SecurityAutoConfiguration
 
 
 
+#### 2.12 MQ的两个函数
+
+下面详细解释你代码中涉及的两个关键部分：
+
+##### 1. `MessagePostProcessor` 接口及其匿名实现
+
+```java
+new MessagePostProcessor() {
+    @Override
+    public Message postProcessMessage(Message message) throws AmqpException {
+        message.getMessageProperties().setExpiration("10000");
+        return message;
+    }
+}
+```
+
+- **MessagePostProcessor** 是 Spring AMQP 提供的一个**函数式接口**（只有一个抽象方法），专门用于在消息真正发送到 RabbitMQ 之前，对消息进行最后的修改。
+- 常见用途包括：
+  - 设置消息的 TTL（过期时间）
+  - 添加自定义 header
+  - 设置优先级、持久化模式等属性
+- 在你的代码中：
+  - 创建了一个匿名内部类实现该接口。
+  - 在 `postProcessMessage` 方法里，通过 `message.getMessageProperties()` 获取消息属性对象。
+  - 调用 `setExpiration("10000")` 将这条消息的生存时间设置为 **10000 毫秒（即 10 秒）**。
+  - 最后返回修改后的 message（也可以返回一个全新的 Message 对象）。
+- 注意：这里设置的是**消息本身的 TTL**，而不是队列的 TTL。消息过期后会变成死信（Dead Letter），常用于实现延迟队列。
+
+##### 2. `convertAndSend` 方法（重载版本）
+
+你用的是 RabbitTemplate 的一个重载方法：
+
+```java
+rabbitTemplate.convertAndSend(
+    "normal.direct",     // exchange
+    "hi",                // routingKey
+    "hello",             // message body（对象）
+    new MessagePostProcessor() { ... }  // 第4个参数：消息后处理器
+);
+```
+
+**RabbitTemplate.convertAndSend 的常用重载形式：**
+
+```java
+void convertAndSend(String exchange, String routingKey, Object message, MessagePostProcessor messagePostProcessor)
+```
+
+- 参数说明：
+  1. **exchange**：目标交换机名称。这里是 `"normal.direct"`（一个 Direct 类型交换机）。
+  2. **routingKey**：路由键。这里是 `"hi"`，消息会路由到绑定了这个 routingKey 的队列。
+  3. **message**：要发送的消息体对象。这里是字符串 `"hello"`。
+     - Spring AMQP 会自动使用内置的消息转换器（默认是 `SimpleMessageConverter`）将 Java 对象（如 String）转换成 `org.springframework.amqp.core.Message` 对象。
+  4. **messagePostProcessor**：消息后处理器。
+     - 在消息真正发送前，Spring 会调用你提供的这个处理器，让你有机会修改即将发送的 Message（比如设置 TTL、header 等）。
+
+**执行流程简要概括：**
+
+1. 你传入一个普通 Java 对象（`"hello"`）。
+2. RabbitTemplate 先用消息转换器把对象转成 `Message`（包含 body 和 MessageProperties）。
+3. 调用你提供的 `MessagePostProcessor`，让你修改这个 Message（这里加了 expiration=10000）。
+4. 最后将修改后的 Message 通过 RabbitMQ 底层通道发送到指定的 exchange 和 routingKey。
+
+##### 实际效果
+
+这条消息被发送到交换机 `normal.direct`，路由键 `hi`。
+
+- 如果对应的队列配置了死信交换机（DLX），并且消费者没有在 10 秒内消费这条消息：
+  - 10 秒后消息过期 → 进入死信队列 → 被路由到死信交换机 → 实现“延迟 10 秒处理”的效果。
+
+这就是 RabbitMQ 中最常见的**基于消息 TTL + 死信交换机**的延迟队列实现方式。
+
+##### 总结对比
+
+| 部分                                       | 作用                               | 关键点                                            |
+| ------------------------------------------ | ---------------------------------- | ------------------------------------------------- |
+| MessagePostProcessor                       | 在发送前最后一次修改 Message 对象  | 常用于动态设置 TTL、header 等                     |
+| convertAndSend(... , MessagePostProcessor) | 发送消息的重载版本，支持发送前修改 | 第4个参数就是处理器，执行顺序在转换之后、发送之前 |
+
+希望这个解释清楚了这两个核心机制！如果还有其他 RabbitMQ 相关问题（如延迟队列完整配置、插件方式等），随时问。
+
+#### 2.13 openfeign的client的fallback包
+
+**fallback 包下的文件主要用于实现 OpenFeign 远程调用的服务降级（容错）机制。**
+**在微服务架构中，当一个服务调用另一个服务失败（例如网络超时、服务宕机、抛出异常）时，为了防止故障扩散导致整个系统崩溃（雪崩效应），我们需要提供一个备用的处理逻辑，这就是 Fallback（降级）。**
+具体到你打开的 ItemClientFallbackFactory.java 文件，它的作用如下：
+捕获远程调用异常： 它实现了 FallbackFactory<ItemClient> 接口，这意味着它是 ItemClient（商品服务客户端）的容错工厂。create 方法中的 Throwable 参数可以让你拿到具体的报错信息。
+定义降级逻辑： 它返回了一个 ItemClient 的匿名实现类，覆盖了接口中的方法，定义了当远程调用失败时该怎么做：
+queryItemByIds (查询商品)：
+逻辑：log.error(...) 记录错误日志，然后返回 Collections.emptyList()（空列表）。
+目的：这是典型的服务降级。如果商品服务挂了，查询不到商品信息，为了不让整个页面报错，这里选择返回一个空数据，让业务能继续跑下去（虽然没有商品数据显示），而不是直接抛出异常中断程序。
+deductStock (扣减库存)：
+逻辑：log.error(...) 记录错误日志，然后 throw new RuntimeException(throwable) 抛出运行时异常。
+目的：这是关键业务保护。扣减库存涉及到钱和货，如果远程调用失败了，不能简单地返回“成功”或“空”，必须抛出异常来触发事务回滚，确保数据的一致性。
+
+
+
+#### 2.14 lambdaUpdate()函数（记住）
+
+这段代码是 **MyBatis-Plus 的链式更新（LambdaUpdate）**，作用是：**把某个商品的库存 `stock` 增加指定数量**（常见于“归还库存/取消订单回滚库存”）。
+
+```
+lambdaUpdate()
+    .setSql("stock = stock + " + item.getNum())
+    .eq(Item::getId, item.getItemId())
+    .update();
+```
+
+##### 逐行解释
+
+- **`lambdaUpdate()`**
+  - 创建一个更新构造器（`LambdaUpdateChainWrapper` 一类的东西）。
+  - 后面可以继续拼接 `set/eq/update` 等条件，最后统一执行 `update()`。
+- **`.setSql("stock = stock + " + item.getNum())`**
+  - 直接拼一段 **SQL 片段** 作为 `SET` 子句。
+  - 等价于：`SET stock = stock + ?`（但你这里是字符串拼接，不是参数占位）。
+  - 目的：**让库存在数据库里原地自增**，避免先查再改引发并发问题。
+- **`.eq(Item::getId, item.getItemId())`**
+  - `WHERE id = item.getItemId()` 的意思。
+  - 这里用 Lambda 写法 `Item::getId`，好处是字段重命名时更安全（少写字符串字段名）。
+- **`.update()`**
+  - 真正执行更新 SQL。
+  - 执行后返回值通常是 `boolean` 或影响行数（看你用的链式 API 版本/封装），表示是否更新成功/是否影响到行。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -11777,7 +11928,8 @@ sudo vmhgfs-fuse .host:/ /mnt/hgfs -o allow_other
 sudo cp /mnt/hgfs/D/ideaProject/hmall/hm-service/Dockerfile /root/Dockerfile
 //你要复制的是一个目录（/mnt/hgfs/D/ideaproject/nginx），但 cp 默认只复制文件，不会复制目录，除非你明确告诉它“递归复制整个目录”（即加上 -r）
 sudo cp -r /mnt/hgfs/D/ideaproject/nginx /root/nginx
-sudo cp -r /mnt/hgfs/D/ProjectData/hm-trade.sql /root/hm-trade.sql
+sudo cp -r /mnt/hgfs/D/ProjectData/elasticsearch-analysis-ik-7.12.1.zip /root/elasticsearch-analysis-ik-7.12.1.zip
+
 //展示有哪些镜像
 docker images
 
@@ -12911,6 +13063,241 @@ java -Dserver.port=8090 -Dcsp.sentinel.dashboard.server=localhost:8090 -Dproject
 
 ![image-20251215132735103](../AppData/Roaming/Typora/typora-user-images/image-20251215132735103.png)
 
+#### 2. 发送者确认
+
+**效率低，最好不要用**
+
+
+
+##### 2.1 简介
+
+![image-20251215142410995](../AppData/Roaming/Typora/typora-user-images/image-20251215142410995.png)
+
+##### 2.2 操作
+
+###### 步骤一
+
+![image-20251215142549624](../AppData/Roaming/Typora/typora-user-images/image-20251215142549624.png)
+
+###### 步骤二
+
+![image-20251215143035093](../AppData/Roaming/Typora/typora-user-images/image-20251215143035093.png)
+
+###### 步骤三（欠缺）
+
+![image-20251215143405926](../AppData/Roaming/Typora/typora-user-images/image-20251215143405926.png)
+
+###### 第三步完整
+
+
+
+![image-20251215150809227](../AppData/Roaming/Typora/typora-user-images/image-20251215150809227.png)
+
+![image-20251215150755440](../AppData/Roaming/Typora/typora-user-images/image-20251215150755440.png)
+
+
+
+
+
+### 5.2 MQ可靠性
+
+#### 1. 问题
+
+![image-20251216230810569](../AppData/Roaming/Typora/typora-user-images/image-20251216230810569.png)
+
+#### 2. 解决方法：数据持久化
+
+##### 2.1 简介
+
+**写代码时，不用在意，因为他自己就是这样的，不用改**
+
+![image-20251216231005376](../AppData/Roaming/Typora/typora-user-images/image-20251216231005376.png)
+
+![image-20251216231133377](../AppData/Roaming/Typora/typora-user-images/image-20251216231133377.png)
+
+#### 3. 解决方法：lazyQueue
+
+##### 3.1 简介
+
+![image-20251216234008289](../AppData/Roaming/Typora/typora-user-images/image-20251216234008289.png)
+
+##### 3.2 添加方法
+
+![image-20251216234139528](../AppData/Roaming/Typora/typora-user-images/image-20251216234139528.png)
+
+##### 3.3 代码添加方法
+
+![image-20251216234305165](../AppData/Roaming/Typora/typora-user-images/image-20251216234305165.png)
+
+#### 4. 总结
+
+![image-20251216234759697](../AppData/Roaming/Typora/typora-user-images/image-20251216234759697.png)
+
+### 5.3 消费者可靠性
+
+#### 1. 消费者确认机制
+
+##### 1.1 简介
+
+![image-20251216235538125](../AppData/Roaming/Typora/typora-user-images/image-20251216235538125.png)
+
+##### 1.2 如何操作
+
+**配置操作就行，选用auto**
+
+![image-20251217224128210](../AppData/Roaming/Typora/typora-user-images/image-20251217224128210.png)
+
+#### 2. 失败重试机制
+
+**避免发送失败，又重新发送，又失败，一直重复......**
+
+![image-20251217225640142](../AppData/Roaming/Typora/typora-user-images/image-20251217225640142.png)
+
+##### 2.1 处理策略
+
+二三都可以，二是没有上面的那个压力大，所以可以
+
+![image-20251217230356321](../AppData/Roaming/Typora/typora-user-images/image-20251217230356321.png)
+
+**如何操作**
+
+![image-20251217231008056](../AppData/Roaming/Typora/typora-user-images/image-20251217231008056.png)
+
+
+
+![image-20251217231331278](../AppData/Roaming/Typora/typora-user-images/image-20251217231331278.png)
+
+
+
+### 5.4 业务幂等性
+
+#### 1. 简介
+
+![image-20251218162100155](../AppData/Roaming/Typora/typora-user-images/image-20251218162100155.png)
+
+#### 2. 解决方法一（唯一id）
+
+![image-20251218162437467](../AppData/Roaming/Typora/typora-user-images/image-20251218162437467.png)
+
+![image-20251218162710834](../AppData/Roaming/Typora/typora-user-images/image-20251218162710834.png)
+
+#### 3. 基于业务逻辑
+
+![image-20251218164136245](../AppData/Roaming/Typora/typora-user-images/image-20251218164136245.png)
+
+#### 4. 总结
+
+![image-20251218165529137](../AppData/Roaming/Typora/typora-user-images/image-20251218165529137.png)
+
+
+
+### 5.5 延迟消息
+
+#### 1. 简介
+
+![image-20251222221801241](../AppData/Roaming/Typora/typora-user-images/image-20251222221801241.png)
+
+#### 2. 死信交换机
+
+![image-20251222223053593](../AppData/Roaming/Typora/typora-user-images/image-20251222223053593.png)
+
+##### 2.1 代码
+
+![image-20251222225616439](../AppData/Roaming/Typora/typora-user-images/image-20251222225616439.png)
+
+
+
+
+
+![image-20251222225627862](../AppData/Roaming/Typora/typora-user-images/image-20251222225627862.png)
+
+
+
+
+
+![image-20251222230210102](../AppData/Roaming/Typora/typora-user-images/image-20251222230210102.png)
+
+
+
+#### 3. 延迟消息插件
+
+##### 3.1 简介
+
+![image-20251223111052696](../AppData/Roaming/Typora/typora-user-images/image-20251223111052696.png)
+
+##### 3.2 代码
+
+延迟消息不要太长，否则影响性能
+
+
+
+**声明延迟属性**
+
+![image-20251223111355319](../AppData/Roaming/Typora/typora-user-images/image-20251223111355319.png)
+
+**声明延迟时间**
+
+![image-20251223111749336](../AppData/Roaming/Typora/typora-user-images/image-20251223111749336.png)
+
+#### 4. 取消超时订单
+
+##### 4.1 简介
+
+![image-20251223123913239](../AppData/Roaming/Typora/typora-user-images/image-20251223123913239.png)
+
+![image-20251223130459647](../AppData/Roaming/Typora/typora-user-images/image-20251223130459647.png)
+
+
+
+## 6. ES
+
+### 6.1 基础
+
+#### 1. 倒排索引
+
+解决mysql模糊匹配复杂度O(n)的问题
+
+![image-20251227120648841](../AppData/Roaming/Typora/typora-user-images/image-20251227120648841.png)
+
+![image-20251227120743523](../AppData/Roaming/Typora/typora-user-images/image-20251227120743523.png)
+
+#### 2. IK分词器
+
+![image-20251227142837604](../AppData/Roaming/Typora/typora-user-images/image-20251227142837604.png)
+
+![image-20251227142856866](../AppData/Roaming/Typora/typora-user-images/image-20251227142856866.png)
+
+![image-20251227143301198](../AppData/Roaming/Typora/typora-user-images/image-20251227143301198.png)
+
+#### 3. 基本概念
+
+![image-20251227144302982](../AppData/Roaming/Typora/typora-user-images/image-20251227144302982.png)
+
+
+
+![image-20251227144540437](../AppData/Roaming/Typora/typora-user-images/image-20251227144540437.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Redis进阶
+
+## 1. 重要知识点
+
+### 1.1 如何启动
+
+```redis
+redis-cli -a 你的密码
+```
 
 
 
@@ -12926,6 +13313,13 @@ java -Dserver.port=8090 -Dcsp.sentinel.dashboard.server=localhost:8090 -Dproject
 
 
 
+## 2. 技术
+
+### 2.1 lpush错误
+
+```redis
+lpush user 1 2 3//执行顺序是1，2，3
+```
 
 
 
@@ -12933,37 +13327,73 @@ java -Dserver.port=8090 -Dcsp.sentinel.dashboard.server=localhost:8090 -Dproject
 
 
 
+## 3. 基础
 
+### 3.1 简介
 
+#### 1. 区别
 
+![image-20251228134857507](../AppData/Roaming/Typora/typora-user-images/image-20251228134857507.png)
 
+#### 2. 常见命令介绍
 
+![image-20251229125357276](../AppData/Roaming/Typora/typora-user-images/image-20251229125357276.png)
 
+### 3.2 命令
 
+#### 1. 通用命令
 
+![image-20251229130819854](../AppData/Roaming/Typora/typora-user-images/image-20251229130819854.png)
 
+#### 2. String结构
 
+![image-20251229224505432](../AppData/Roaming/Typora/typora-user-images/image-20251229224505432.png)
 
+![image-20251229224725930](../AppData/Roaming/Typora/typora-user-images/image-20251229224725930.png)
 
+#### 3. key结构
 
+![image-20251229225639350](../AppData/Roaming/Typora/typora-user-images/image-20251229225639350.png)
 
+#### 4. hash类型
 
+##### 4.1 简介
 
+![image-20251230210442100](../AppData/Roaming/Typora/typora-user-images/image-20251230210442100.png)
 
+##### 4.2 常见命令
 
+![image-20251230210638390](../AppData/Roaming/Typora/typora-user-images/image-20251230210638390.png)
 
+#### 5. List类型
 
+##### 5.1 简介
 
+![image-20251230212250239](../AppData/Roaming/Typora/typora-user-images/image-20251230212250239.png)
 
+##### 5.2 命令
 
+![image-20251230212530512](../AppData/Roaming/Typora/typora-user-images/image-20251230212530512.png)
 
+#### 6. Set类型
 
+##### 6.1 简介
 
+![image-20251230220236082](../AppData/Roaming/Typora/typora-user-images/image-20251230220236082.png)
 
+##### 6.2 命令
 
+![image-20251230220452755](../AppData/Roaming/Typora/typora-user-images/image-20251230220452755.png)
 
+#### 7. sortedset
 
+##### 7.1 简介
 
+![image-20251231150834117](../AppData/Roaming/Typora/typora-user-images/image-20251231150834117.png)
+
+##### 7.2 命令
+
+![image-20251231151034351](../AppData/Roaming/Typora/typora-user-images/image-20251231151034351.png)
 
 
 
@@ -13314,6 +13744,12 @@ git push -u origin main
 git remote set-url origin ssh://git@ssh.github.com:443/你的用户名/你的仓库名.git
 
 git remote set-url origin ssh://git@ssh.github.com:443/DarksideCasria/Scrapy_NCBI.git
+
+
+
+
+
+
 
 
 
