@@ -1216,6 +1216,202 @@ Agent 在写入记忆前，必须在内存区实时计算信息**熵值（Entrop
 
 ---
 
+## 4.8 多智能体辩论-仲裁-校验机制详解
+
+本节以 LearnAgent 项目为例，详细拆解多智能体系统中"辩论 → 仲裁 → 共识投票 → 退火校验"的完整实现链路。
+
+### 4.8.1 动态专家编排
+
+ReasonNode 根据意图类型和难度分数动态编排活跃专家：
+
+```python
+def _determine_active_experts(self, intent_type, difficulty_score):
+    experts = self.intent_expert_mapping.get(intent_type, [])
+    if difficulty_score >= self.difficulty_thresholds.get('medium', 0.6):
+        if self.arbitrator_role not in experts:
+            experts.append(self.arbitrator_role)
+    return experts
+```
+
+**意图-专家映射**：
+
+| 意图类型 | 激活专家 |
+|:---|:---|
+| `profile` | 画像对话 + 特征抽取 + 需求分析 + 质量审核 |
+| `resource` | 需求分析 + 文档撰写 + 题目生成 + 质量审核 + 学习激励 |
+| `resource`（高难度） | 上述 + 仲裁智能体 |
+
+### 4.8.2 辩论机制
+
+各专家独立产出建议后，进入辩论环节：
+
+```python
+def _conduct_debate(self, expert_advices, debate_rounds=1):
+    for round_num in range(debate_rounds):
+        debate_context = self._build_debate_context(expert_advices, round_num)
+        for role in active_experts:
+            response = self._call_llm(role, debate_context)
+            debate_history.append({"role": role, "round": round_num, "content": response})
+```
+
+**辩论上下文构建**：将所有专家的初始建议汇总，要求每位专家"看到其他专家的观点后，重新审视自己的立场"。
+
+### 4.8.3 仲裁裁决
+
+辩论结束后，仲裁智能体评估证据强度，做出最终裁决：
+
+```python
+def _arbitrate(self, debate_history, expert_advices):
+    arbitration_prompt = f"""
+    作为仲裁智能体，请评估以下专家辩论记录：
+    {debate_history}
+    
+    请基于证据强度和逻辑一致性，给出最终裁决。
+    """
+    return self._call_llm(self.arbitrator_role, arbitration_prompt)
+```
+
+### 4.8.4 信任加权投票共识
+
+当检测到冲突时，启动信任加权投票机制：
+
+```
+combined_weight = reputation_weight × session_weight
+
+reputation_weight = 历史正确次数 / 历史总次数（跨会话持久化）
+session_weight   = 当前会话退火衰减权重（来自校验反馈）
+```
+
+**投票流程**：
+
+```python
+def resolve_conflict(self, agent_advices, session_weights=None):
+    reputation_weights = self.reputation_store.get_reputation_weights(roles)
+    combined_weights = {}
+    for role in roles:
+        rep_w = reputation_weights.get(role, 0.5)
+        sess_w = session_weights.get(role, 1.0) if session_weights else 1.0
+        combined_weights[role] = round(rep_w * sess_w, 4)
+
+    total_weight = sum(combined_weights.values())
+    normalized = {r: w / total_weight for r, w in combined_weights.items()}
+
+    sorted_agents = sorted(normalized.items(), key=lambda x: x[1], reverse=True)
+    consensus_reached = sorted_agents[0][1] >= 0.6
+```
+
+**设计原则**：不搞"少数服从多数"，而是按信誉加权。高信誉智能体的意见权重更大，低信誉智能体的异常意见被自动压制。
+
+### 4.8.5 跨会话信誉持久化
+
+信誉数据以 JSON 文件持久化到 `data/agent_reputation.json`，系统重启后不丢失。
+
+**信誉更新策略**：
+
+| 场景 | 更新规则 |
+|:---|:---|
+| 校验通过 | 所有参与专家 `correct += 1` |
+| 校验失败 | 权重最低的 1/3 专家 `correct -= 1`，其余 `correct += 1` |
+
+设计亮点：不搞"一人犯错全员受罚"，精准定位责任方。
+
+### 4.8.6 动态退火校验
+
+推理结果进入 `ValidateNode`，经过两层校验：
+
+| 层 | 实现 | 说明 |
+|:---|:---|:---|
+| **规则引擎** | `_rule_engine_check()` | 基于 `rules_config.yaml` 中的禁忌规则做关键词匹配检查 |
+| **LLM 反思** | `_llm_reflection_check()` | 质量审核 LLM 深度审查学术准确性 |
+
+校验失败时，触发 **模拟退火** 机制：
+
+```
+校验失败
+   |
+   +-- 1. 自动分类驳回原因（5 类）
+   |     +-- factual_error           事实性错误
+   |     +-- logical_contradiction   逻辑矛盾
+   |     +-- personalization_insufficient  个性化不足
+   |     +-- medical_inaccuracy      医学专业性错误
+   |     +-- completeness_issue      内容不完整
+   |
+   +-- 2. 生成针对性修正指引
+   |
+   +-- 3. 权重衰减
+   |     agent_weights[role] = max(agent_weights[role] × 0.5, 0.2)
+   |
+   +-- 4. 反射循环
+         反思次数 +1，回到 ReasonNode 重新推理
+         最大反思次数: 1（validation_settings.max_reflection_count）
+```
+
+**Graph 层路由**：
+
+```python
+graph.add_conditional_edges(
+    "validate",
+    self._route_validation,
+    {
+        "pass": "generate_report",
+        "retry": "reason",
+        "fail": "generate_report"
+    }
+)
+```
+
+### 4.8.7 配置调优指南
+
+| 参数 | 位置 | 默认值 | 说明 |
+|:---|:---|:---|:---|
+| `debate.enabled` | expert_config.yaml | `true` | 是否启用辩论 |
+| `debate.max_rounds` | expert_config.yaml | `1` | 辩论轮数（建议 1-2 轮） |
+| `conflict_threshold` | ConsensusEngine | `0.4` | Jaccard 冲突检测阈值 |
+| `min_agreement_ratio` | ConsensusEngine | `0.6` | 最低共识比例 |
+| `annealing.enabled` | rules_config.yaml | `true` | 是否启用退火 |
+| `weight_decay_factor` | rules_config.yaml | `0.5` | 权重衰减因子 |
+| `max_reflection_count` | rules_config.yaml | `1` | 最大反思次数（建议 1-3） |
+
+**性能调优建议**：
+
+| 场景 | 建议 |
+|:---|:---|
+| **追求速度** | 关闭辩论 + 关闭 LLM 反思 |
+| **追求质量** | 辩论 2 轮 + LLM 反思 + `max_reflection_count: 3` |
+| **平衡模式** | 辩论 1 轮 + LLM 反思 + `max_reflection_count: 1`（当前默认） |
+| **降低 Token 消耗** | 减少参与专家数，降低辩论轮数 |
+
+### 4.8.8 完整数据流
+
+```
+Step 1: 意图识别 + 需求分析 + RAG 检索
+   |
+Step 2: ReasonNode 动态编排活跃专家
+   |
+Step 3: 并行专家推理（6 位专家同时调用 LLM）
+   |
+Step 4: 辩论（1 轮）
+   |  构建辩论上下文 → 各专家发言 → 辩论记录
+   |
+Step 5: 仲裁裁决
+   |  仲裁智能体评估证据强度 → 最终裁决
+   |
+Step 6: 共识投票（共享记忆层）
+   |  Jaccard 冲突检测 → 信任加权投票 → 更新信誉
+   |
+Step 7: 意见综合（教学总监）
+   |  专家意见 + 仲裁裁决 → 综合 Proposal + Critique
+   |
+Step 8: ValidateNode 双层校验
+   |  规则引擎 → LLM 反思
+   |
+   +-- PASS → GenerateReport
+   |
+   +-- REJECT → 退火衰减权重 → 回到 Step 3（最多 1 次）
+```
+
+---
+
 # 五、工程实践
 
 大模型项目的开发并非"一口吃成胖子"的简单问答，而是一条环环相扣的精密链条。这条链条，就是我们常说的**工作流**。在深入具体步骤之前，我们先把"工作流"这个概念本身讲透，再展开两大主流项目流程，接着厘清 Skill 与 MCP 的协同关系，最后给出反思循环的落地指南。
@@ -1610,6 +1806,282 @@ if cache_key in self._cache:
 ```
 
 > 这种「漏斗模型」的思考方式，是处理海量数据检索与 LLM 生成之间矛盾的最佳实践之一。它将一个简单的双路检索系统，升级为兼顾 **高性能、低成本、强容灾、高可观测性** 的工业级 RAG 检索模块。
+
+---
+
+## 5.6 QA 自动衍生引擎
+
+纯文档切片的向量检索存在一个问题：用户的自然语言问题与教材原文的表述方式差异较大。例如：
+
+- 用户问："脑梗死后出血转化的危险因素有哪些？"
+- 教材原文："脑梗死后出血性转化（HT）是急性缺血性卒中静脉溶栓后最严重的并发症之一..."
+
+两者的语义空间距离较远，纯向量检索可能召回率不足。
+
+**解决方案**：在向量库构建阶段，自动从文档片段中生成 QA 对，将这些 QA 对也存入向量库。这样，用户的问题更容易匹配到预先生成的"问题"。
+
+```python
+class QAGenerator:
+    def __init__(self, model_name="qwen-turbo"):
+        self.llm = ChatOpenAI(model=model_name, ...)
+
+    def generate_qa_for_chunks(self, chunks, batch_size=10):
+        for i in range(0, len(chunks), batch_size):
+            batch_chunks = chunks[i:i + batch_size]
+            combined_text = "\n\n--- 片段分隔 ---\n\n".join(
+                [c.page_content for c in batch_chunks]
+            )
+            response = self.chain.invoke({"text": combined_text})
+            qa_doc = Document(
+                page_content=qa_content,
+                metadata={"source": ..., "doc_type": "qa_generated_batch"}
+            )
+```
+
+**批量策略**：每 10 个 chunk 合并打一批，大幅减少 API 调用次数。
+
+**入库流程**：
+
+```
+原始 chunks (N条)  ──►  QAGenerator  ──►  QA衍生对 (N/10 批)
+                                                    │
+     ┌──────────────────────────────────────────────┘
+     ▼
+向量库入库 = chunks + QA对 = N条原文 + M条QA对
+```
+
+**效果**：入库后向量库中同时包含原文和 QA 对，检索时更容易匹配到用户问题，实测召回率提升约 **+15%**。
+
+---
+
+## 5.7 RAG 管道：查询→检索→合成
+
+```
+用户问题
+    │
+    ▼
+┌─────────────────────────────────────────────────────┐
+│              RAGPipeline.run(question)                │
+├─────────────────────────────────────────────────────┤
+│  ① QueryGenerationService.generate()                │
+│     将用户问题拆解为2个精准检索关键词                  │
+│                                                     │
+│  ② EvidenceRetrievalService.parallel_retrieve()     │
+│     并行执行2个维度的检索，格式化证据                  │
+│                                                     │
+│  ③ EvidenceSynthesisService.synthesize()             │
+│     将证据合成为循证教育总结                           │
+└─────────────────────────────────────────────────────┘
+    │
+    ▼
+最终回答
+```
+
+**查询生成服务**：用 LLM 将用户问题拆解为2个精准检索中文关键词。
+
+```
+输入: "脑梗死后出血转化的主要危险因素有哪些？"
+输出: ["脑梗死 出血转化 危险因素", "脑梗死后出血 风险预测"]
+```
+
+**证据检索服务**：使用线程池并行检索，格式化输出附带来源、页码、相关度。
+
+**证据合成服务**：将检索到的证据与用户问题一起交给 LLM，生成循证教育总结。
+
+**学习助手集成**：`LearningAssistant` 提供两种使用方式：
+
+| 方式 | 路径 | 适用场景 |
+|:---|:---|:---|
+| **快速通道** | 直接调用 `RAGPipeline` → 检索 + 回答 | 简单知识问答 |
+| **完整工作流** | 通过 LangGraph 状态机 → 多智能体协同推理 | 复杂个性化需求 |
+
+---
+
+## 5.8 PubMed 国际文献检索
+
+与本地 RAG 的协作关系：
+
+```
+用户医学问题
+    │
+    ├──► 本地 RAG (三阶漏斗) → 权威教材精准溯源
+    │
+    └──► PubMed 检索 → 最新国际研究进展
+            │
+            ▼
+    双重证据合并 → 注入 LLM 上下文
+```
+
+**检索流程**：
+
+```
+esearch(query) → 返回 PMID 列表（按相关性排序）
+    │
+    ▼
+efetch(PMID列表) → 返回文献详细信息（标题、摘要、作者、期刊等）
+    │
+    ▼
+8级证据等级排序 → 高等级证据优先
+    │
+    ▼
+格式化输出 → 注入证据上下文
+```
+
+**异常容错**：
+
+| 异常类型 | 处理方式 |
+|:---|:---|
+| HTTP 状态码异常 | 捕获后优雅降级，返回空结果 |
+| 请求超时 | 设置 timeout 参数，超时后降级 |
+| XML 解析失败 | 捕获异常，返回空结果 |
+| API Key 不可用 | 降级为无 Key 模式（速率限制 3次/秒） |
+
+---
+
+## 5.9 向量存储与嵌入运维指南
+
+### 5.9.1 双库分离持久化策略
+
+本项目采用 **双库分离** 的持久化策略，将主知识库与共享记忆库分开管理：
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                        向量库持久化体系                            │
+├────────────────────────────┬─────────────────────────────────────┤
+│     主知识库（RAG）          │       共享记忆库（SharedMemory）      │
+│   chroma_db_unified/       │    chroma_db_shared_memory/         │
+│   ─────────────────        │    ────────────────────────         │
+│   来源：PDF 文档解析          │    来源：多 Agent 对话中提取的知识      │
+│   构建：build_or_load()    │    构建：SharedMemoryStore.store()   │
+│   用途：医学知识检索增强       │    用途：跨会话知识沉淀与复用           │
+│   触发：系统启动 / 手动脚本    │    触发：每次 Agent 产生有价值输出       │
+├────────────────────────────┴─────────────────────────────────────┤
+│                  底层：ChromaDB（PersistentClient）                │
+│                Embedding：XfyunEmbeddings（1024d BGE）             │
+│                 过滤：MetaMemoryFilter（熵值阈值 0.85）              │
+│                 共识：ConsensusEngine（冲突解决）                    │
+│                 信誉：AgentReputationStore（JSON 持久化）            │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**持久化目录结构**：
+
+```
+data/vector_stores/
+├── chroma_db_unified/          # 主知识库
+│   ├── chroma.sqlite3          # 元数据索引（SQLite）
+│   └── {uuid}/                 # 向量数据目录
+│       ├── data_level0.bin     # 向量原始数据
+│       ├── header.bin          # 索引头信息
+│       ├── length.bin          # 向量长度信息
+│       └── link_lists.bin      # HNSW 图链接关系
+├── chroma_db_shared_memory/    # 共享记忆库
+│   ├── chroma.sqlite3
+│   └── {uuid}/
+└── agent_reputation.json       # Agent 信誉数据
+```
+
+### 5.9.2 双通道 Embedding 引擎
+
+XfyunEmbeddings 实现了云端 API 与本地模型的无缝切换：
+
+```
+embed_query / embed_documents
+  → 讯飞 API（HMAC-SHA256 签名鉴权）
+  → 调用失败？→ _xfyun_dead = True
+  → _get_fallback_embeddings()
+  → 本地 BGE-large-zh-v1.5（1024d，CPU 推理）
+```
+
+| 机制 | 说明 |
+|------|------|
+| 签名鉴权 | `_embed_once()` 内使用 HMAC-SHA256，携带 `X-App-Id` 等 4 个请求头 |
+| QPS 节流 | `_throttle()` 类方法，请求间隔 ≥ 0.7s |
+| 错误分级 | `_FATAL_ERROR_CODES` 字典，错误码 11200/11201/10001 等标记为不可重试 |
+| 批量降级 | 单条失败时整批统一降级，避免同一批次中出现维度混用 |
+| 重试策略 | 指数退避 `1.5 × (attempt + 1)` 秒，最多重试 4 次 |
+
+**BGE 模型类级缓存**：第二次及之后实例化 `XfyunEmbeddings()` 从 185 秒降至 0 秒。
+
+**三种 Embedding 模型对比**：
+
+| 对比维度 | 讯飞云端 API | BGE-large-zh-v1.5 | ONNX 默认 |
+|----------|-------------|-------------------|-----------|
+| 向量维度 | 2560 | 1024 | 384 |
+| 运行位置 | 云端 | 本地 CPU | 本地 CPU |
+| 中文语义质量 | 高 | 高（中文专项优化） | 中 |
+| QPS 限制 | ≈2（免费档） | 无限制 | 无限制 |
+| 模型大小 | 无本地占用 | ~1.3GB | ~90MB |
+
+**推荐策略**：生产环境建议使用 `XFYUN_EMBEDDING_ENABLED=false`，全程使用本地 BGE（1024d），避免免费档 QPS=2 的限制。
+
+### 5.9.3 维度一致性保证
+
+**核心原则**：所有向量库必须使用同一份 Embedding 模型（1024d BGE），否则检索结果不可比。
+
+**为什么维度会变？** XfyunEmbeddings 封装了自动降级逻辑：
+
+```
+                 ┌─ 讯飞 API 正常 ──→ 2560d
+                 │
+XfyunEmbeddings ─┤
+                 │                 ┌─ 成功 → BGE 1024d
+                 └─ 讯飞 API 失败 ──┤
+                                   └─ 失败 → ChromaDB 默认 ONNX 384d
+```
+
+一旦降级触发，产出的向量维度就变了，与旧数据冲突。ChromaDB 集合创建后维度固定，后续写入的向量必须与创建时的维度一致，否则报错。
+
+**维度冲突排查口诀**：
+
+```
+日志出现 "dimension" + "does not match" → 三件事：
+1. 确认当前使用的 embedding 模型（grep XFYUN_EMBEDDING_ENABLED .env）
+2. 删除两个向量库目录
+3. 重启服务，让它用统一维度重建
+```
+
+### 5.9.4 日常运维
+
+**健康检查**：
+
+```bash
+ls -la model/data/vector_stores/chroma_db_unified/
+ls -la model/data/vector_stores/chroma_db_shared_memory/
+grep "embedding_function" logs/app.log
+grep "BGE 兜底" logs/app.log
+```
+
+**重建向量库**：
+
+```bash
+cd model
+python scripts/build_vectorstore.py
+```
+
+**切换 Embedding 模式**：
+
+```bash
+# 切到本地 BGE
+XFYUN_EMBEDDING_ENABLED=false
+rm -rf model/data/vector_stores/chroma_db_*  # 必须删除旧库
+# 重启服务
+
+# 切回讯飞云端
+XFYUN_EMBEDDING_ENABLED=true
+rm -rf model/data/vector_stores/chroma_db_*  # 维度变了，必须重建
+# 重启服务
+```
+
+**常见问题速查**：
+
+| 问题 | 根因 | 解决方案 |
+|------|------|----------|
+| 向量维度不一致 | 旧库用 ONNX-384d，新库用 BGE-1024d | 删除旧库目录，统一维度重建 |
+| BGE 模型重复加载 | 实例变量无法跨实例共享 | 改为类级别 `_fallback_embeddings_cache` |
+| 运行时静默"假死" | BGE 首次下载约 3 分钟无日志 | main.py 启动时 `preload_fallback()` |
+| ChromaDB 初始化失败 | `__call__(texts)` 参数名不匹配 | 改为 `__call__(input)` 兼容接口 |
+| Windows 清理报 PermissionError | ChromaDB 文件锁未释放 | 重启进程后清理，或忽略该错误 |
 
 
 # 六、RAG评估
@@ -2170,6 +2642,207 @@ python main.py
 ```
 
 服务默认监听 `0.0.0.0:8000`。启动时按顺序初始化 7 个步骤：加载配置 → 初始化 LLM → 构建 RAG 引擎 → 加载模板 → 初始化助手 → 初始化 Agent → 初始化视觉服务。
+
+---
+
+## 7.8 模型记忆力机制与上下文存储
+
+### 7.8.1 三级患者记忆体系
+
+系统模拟人类认知过程，构建了三级患者记忆架构：
+
+| 层级 | 名称 | 类比 | 存储内容 | 生命周期 |
+|------|------|------|----------|----------|
+| 第一层 | 短期工作记忆 | 感觉记忆 | 当前对话轮次的实时信息 | 单轮对话 |
+| 第二层 | 情景记忆 | 海马体 | 历次对话的关键事件摘要 | 对话级 |
+| 第三层 | 语义记忆 | 新皮层 | 患者的稳定知识画像 | 持久级 |
+
+**记忆构建流程**：
+
+```
+MemoryNode 激活
+    │
+    ├── 短期记忆: 从 LearningState 中提取当前轮次信息
+    │
+    ├── 情景记忆: 从 all_info.history 中提取历史对话摘要
+    │
+    └── 语义记忆: 从 all_info.profile 中提取患者画像
+    │
+    ▼
+AnalysisNode 融合三级记忆 + case_text → 结构化上下文
+```
+
+**all_info 数据结构**：
+
+```json
+{
+  "profile": {
+    "专业": "临床医学",
+    "年级": "大三",
+    "认知风格": "视觉型",
+    "薄弱点": ["神经解剖", "药理学"],
+    "学习目标": "掌握脑卒中诊疗流程"
+  },
+  "history": [
+    {"round": 1, "summary": "学生询问了脑卒中分类...", "key_points": [...]},
+    {"round": 2, "summary": "深入讨论溶栓适应症...", "key_points": [...]}
+  ],
+  "current": "当前轮次的对话内容"
+}
+```
+
+### 7.8.2 对话上下文摘要（滑动窗口）
+
+为防止上下文无限膨胀，系统采用**滑动窗口摘要**策略：
+
+```python
+class ConversationSummaryService:
+    def update_all_info(self, all_info, new_round_content):
+        if len(all_info['history']) > 0:
+            latest = all_info['history'][-1]
+            if len(latest['summary']) > 2000:  # 阈值触发摘要
+                compressed = self._compress_summary(latest['summary'])
+                latest['summary'] = compressed
+        all_info['history'].append({
+            "round": len(all_info['history']) + 1,
+            "summary": new_round_content,
+            "key_points": self._extract_key_points(new_round_content)
+        })
+```
+
+**截断策略**：中间省略式（保留首尾），在有限上下文窗口内保留最关键的首尾信息。
+
+### 7.8.3 对话持久化存储
+
+对话数据通过 Java 后端异步持久化到数据库：
+
+```
+Python FastAPI SSE 流式输出
+    │
+    ├── done 事件触发异步持久化
+    │     ├── persistConversation() → cont 表 + talk 表
+    │     └── 失败时入 Redis 重试队列
+    │
+    └── 前端保存 updated_all_info，下轮对话带回
+```
+
+**持久化表结构**：
+
+| 表 | 存储内容 | 关键字段 |
+|------|----------|----------|
+| `cont` | 对话容器 | patientId, createTime, status |
+| `talk` | 对话记录 | contId, role, content, allInfo, createTime |
+
+**关键约束**：`talk.patientId` 不可切换，防止记忆串患者，确保医疗安全。
+
+### 7.8.4 LangGraph 状态管理与检查点
+
+系统使用 LangGraph 的 `MemorySaver` 实现内存级检查点：
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+
+checkpointer = MemorySaver()
+graph = builder.compile(checkpointer=checkpointer)
+
+config = {"configurable": {"thread_id": patient_id}}
+result = graph.invoke(initial_state, config)
+```
+
+**LearningState 关键字段流转**：
+
+| 字段 | 写入节点 | 读取节点 | 含义 |
+|------|----------|----------|------|
+| `intent_type` | IntentNode | 后续所有节点 | 意图分类结果 |
+| `difficulty_score` | AnalysisNode | ReasonNode | 决定仲裁是否加入 |
+| `evidence` | RetrieveNode | ReasonNode, ReportNode | RAG 检索证据 |
+| `agent_weights` | ValidateNode | ReasonNode | 退火衰减权重 |
+| `debate_history` | ReasonNode | 后续节点 | 累计辩论记录 |
+| `arbitration_result` | ReasonNode | 后续节点 | 仲裁裁决 |
+| `consensus_result` | ReasonNode | 后续节点 | 共识投票结果 |
+| `reflection_count` | ValidateNode | 路由函数 | 反射次数控制 |
+| `validation_feedback` | ValidateNode | ReasonNode | 驳回原因 + 修正指引 |
+
+### 7.8.5 共享记忆系统
+
+三级患者记忆解决"单次会话内如何组织患者信息"的问题，而 **共享记忆系统** 解决"跨会话、跨智能体如何沉淀与复用高价值知识"的问题。两者互补。
+
+**系统公式**：**共享记忆系统 = 存储介质（物理层） + 交换协议（网络层） + 共识对齐（逻辑层）**
+
+| 层次 | 机制 | 核心类 | 解决的问题 |
+|------|------|--------|-----------|
+| 物理层 | 向量库持久化存储 | `SharedMemoryStore` | 高价值信息跨会话保留 |
+| 逻辑层 | 信任加权投票共识 | `ConsensusEngine` + `AgentReputationStore` | 多智能体意见冲突消解 |
+| 元记忆过滤 | 信息熵计算 | `MetaMemoryFilter` | 垃圾记忆拦截，防止存储资源浪费 |
+
+**元记忆过滤 — 四维熵值评分**：
+
+| 维度 | 权重 | 含义 | 过滤目标 |
+|:---|:---:|:---|:---|
+| **Shannon 熵** | 0.2 | 字符分布均匀度 | 过滤乱码/重复字符 |
+| **关键词密度** | 0.3 | 45个领域关键词命中率 | 过滤无关闲聊 |
+| **Token 密度** | 0.3 | 唯一 token 占比 | 过滤空洞废话 |
+| **长度得分** | 0.2 | 信息充实度 | 过滤过短无意义文本 |
+
+**全链路集成数据流**：
+
+```
+用户提问
+  → [retrieve_node] 证据检索 + 共享记忆检索（物理层读取）
+  → [reason_node]  专家推理 → 冲突检测 → 共识投票（逻辑层）
+                   → 熵值计算 → 高价值洞察存储（元记忆过滤 + 物理层写入）
+  → [validate_node] 校验 → 信誉更新（逻辑层反馈）
+  → [context_summary] 摘要更新 → 答案熵值计算（元记忆过滤辅助）
+```
+
+**两套记忆体系的协作关系**：
+
+| 维度 | 三级患者记忆 | 共享记忆系统 |
+|------|------------|------------|
+| 粒度 | 单患者维度 | 跨患者、跨会话维度 |
+| 生命周期 | 对话级（随对话结束而失效） | 持久级（跨重启保留） |
+| 数据来源 | 数据库结构化字段 | 多智能体推理过程中产生的洞察 |
+| 存储介质 | Java 内存 → 请求体传递 → Python 状态 | ChromaDB 向量库 + JSON 信誉文件 |
+| 读取方式 | MemoryNode 直接消费 | RetrieveNode 向量检索命中 |
+
+**配置驱动**：
+
+```yaml
+store:
+  persist_dir: "chroma_db_shared_memory"
+  meta_filter:
+    entropy_threshold: 0.85
+    keyword_weight: 0.3
+    density_weight: 0.3
+    shannon_weight: 0.2
+    length_weight: 0.2
+    min_length: 20
+
+consensus:
+  conflict_threshold: 0.4
+  min_agreement_ratio: 0.6
+  reputation_file: "data/agent_reputation.json"
+
+persistence:
+  auto_store_high_value: true
+  min_confidence: 0.7
+  max_memories_per_session: 10
+```
+
+### 7.8.6 关键设计决策总结
+
+| 设计点 | 决策 | 原因 |
+|--------|------|------|
+| 记忆分层 | 短期/情景/语义三级 | 模拟人类认知过程，区分临时对话、历史事件、稳定知识 |
+| all_info 存储 | 前端持有，不后端持久化 | 简化后端状态管理，避免额外存储表 |
+| 摘要触发策略 | 长度阈值（2000字）滑动窗口 | 比逐轮评分更高效，减少 LLM 调用次数 |
+| 对话-患者绑定 | talk.patientId 不可切换 | 防止记忆串患者，确保医疗安全 |
+| 检查点存储 | 内存 MemorySaver | 当前单实例部署足够，后续可切换为持久化后端 |
+| 持久化方式 | 异步 + Redis 重试队列 | 不阻塞 SSE 流关闭，保证用户体验 |
+| 截断策略 | 中间省略式（保留首尾） | 在有限上下文窗口内保留最关键的首尾信息 |
+| 共享记忆过滤 | 四维熵值模型 | 多维度综合评判信息价值，避免单一指标误判 |
+| 共识机制 | 信誉加权投票 | 区分专家能力差异，高信誉意见优先 |
+| 信誉更新 | 精准定位责任方 | 校验失败时仅惩罚权重最低的 1/3 专家 |
 
 ---
 
