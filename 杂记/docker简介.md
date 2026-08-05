@@ -16,6 +16,7 @@ Docker 让每个应用跑在隔离的容器里，自带所有依赖，互不干�
 
 **LearnAgent 项目容器拓扑**：
 
+```
 +---------------------------------------------------------+
 |                     Docker 引擎                          |
 |  +----------+ +----------+ +--------------+            |
@@ -29,6 +30,7 @@ Docker 让每个应用跑在隔离的容器里，自带所有依赖，互不干�
 |  |    :8080     | |    :5173     |                      |
 |  +--------------+ +--------------+                      |
 +---------------------------------------------------------+
+```
 
 ---
 
@@ -40,17 +42,20 @@ Docker 让每个应用跑在隔离的容器里，自带所有依赖，互不干�
 
 ### 2.1 Model — Python Dockerfile
 
+```dockerfile
 FROM python:3.10-slim              # 基础镜像：Python 3.10 精简版
 WORKDIR /app                       # 工作目录
 COPY requirements.txt .            # 先复制依赖文件（利用缓存）
 RUN pip install -r requirements.txt # 安装依赖
 COPY . .                           # 复制源代码
 CMD ["python", "app/main.py"]      # 启动命令
+```
 
 **为什么 COPY 分两步？** Docker 每一行都是一个层。requirements.txt 不常变，但代码经常变。分开写可以让 Docker 缓存依赖安装层，只重新构建代码层，加速构建。
 
 ### 2.2 Backend — Java Maven 多阶段构建
 
+```dockerfile
 # 阶段 1：构建阶段（用 Maven + JDK 21 编译）
 FROM maven:3.9-eclipse-temurin-21 AS build
 COPY pom.xml .
@@ -62,11 +67,13 @@ RUN mvn package -DskipTests          # 编译打包
 FROM eclipse-temurin:21-jre
 COPY --from=build /app/target/*.jar app.jar
 CMD ["java", "-jar", "app.jar"]
+```
 
 **多阶段构建的精妙之处**：构建阶段用 Maven（带 JDK + 依赖），最终镜像只留 JRE + jar 包，体积从 ~600MB 降到 ~200MB。
 
 ### 2.3 Frontend — Vue + Nginx
 
+```dockerfile
 # 阶段 1：Node 构建
 FROM node:20-alpine AS build
 COPY package*.json .
@@ -78,6 +85,7 @@ RUN npm run build                    # 产出 dist/
 FROM nginx:1.27-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+```
 
 ---
 
@@ -89,10 +97,13 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 docker-compose 一键搞定：
 
-  docker compose up -d --build
+```bash
+docker compose up -d --build
+```
 
 ### 关键设计解析
 
+```yaml
 services:
   mysql:
     image: mysql:8.0
@@ -118,6 +129,7 @@ services:
   frontend:
     ports:
       - "5173:80"      # 5. 端口映射：宿主机 5173 -> 容器内 80
+```
 
 | 设计点 | 作用 |
 |--------|------|
@@ -131,6 +143,7 @@ services:
 
 ## 4. 三者关系总结
 
+```
 Dockerfile                  docker-compose.yml
    |                              |
    | 定义怎么做镜像              | 定义怎么编排容器
@@ -142,9 +155,11 @@ Dockerfile                  docker-compose.yml
    |                              |
    v                              v
  静态的、分层的文件包           运行的、有网络的、有状态的服务
+```
 
 ### 一键启动流程
 
+```
 docker compose up -d --build
   |
   +--> 构建 backend 镜像（Dockerfile -> Maven 编译 -> jar）
@@ -155,6 +170,7 @@ docker compose up -d --build
   |
   +--> 按依赖顺序启动：
         mysql (健康) -> redis (启动) -> model (健康) -> backend -> frontend
+```
 
 ### 常用命令
 
