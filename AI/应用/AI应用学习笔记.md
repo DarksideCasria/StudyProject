@@ -12,8 +12,8 @@
 | 四 | [多智能体系统](#四多智能体系统) | 角色扮演模式、三层系统架构、Supervisor模式、典型框架、实战案例、MAS终极架构白皮书 |
 | 五 | [工程实践](#五工程实践) | 工作流概念、项目流程、Skill与MCP、反思循环落地、Hybrid RAG |
 | 六 | [RAG评估](#六rag评估) | Ragas框架、核心指标与计算方法 |
-| 七 | [实战项目](#七实战项目) | LearnAgent教育场景、项目结构、模块映射、核心链路、API、配置 |
-| 八 | [实战项目：脑卒中 CDSS](#八实战项目-脑卒中-cdss) | 医疗CDSS、双轴矩阵多智能体、急诊绿道、多模态推理 |
+| 七 | [实战项目](#七实战项目) | LearnAgent 脑卒中医学教育系统、项目结构、模块映射、核心链路、API、配置、记忆机制 |
+| 八 | [实战项目：脑卒中 CDSS](#八实战项目脑卒中-cdss) | 医学多模态影像、领域输入守卫、辩论仲裁、共享记忆、双层校验 |
 
 ---
 
@@ -1099,11 +1099,11 @@ reject    knowledge    analysis
 
 | 维度 | LearnAgent（教育场景） | 脑卒中 CDSS（医疗场景） |
 |------|----------------------|------------------------|
-| 多智能体架构 | 6 专家并行 → 加权综合 | 双轴矩阵：3 专家 × 3 决策阶段 |
-| 推理拓扑 | 并行推理 → 规则+LLM 双重校验 | Proposer-Critic-Integrator 串并行混合 |
-| 反思机制 | 规则引擎 + LLM 反思（最多 3 次） | Critic 硬拦截 + Integrator 自愈反思流 |
-| 安全等级 | 教育场景（容错较高） | 医疗场景（零容忍硬规则拦截） |
-| 独有创新 | AI QA 自建引擎 | 时效硬管控、双通道分流、多模态联合推理 |
+| 多智能体架构 | 6 专家并行 → 加权综合 | 双轴矩阵：3 专家 × 4 决策阶段 |
+| 推理拓扑 | 并行推理 → 规则+LLM 双重校验 | Reason→Debate→Consensus→Validate 串并行混合 |
+| 反思机制 | 规则引擎 + LLM 反思（最多 3 次） | Validate 双层校验 + 有界反思循环 |
+| 安全等级 | 教育场景（容错较高） | 医疗场景（零容忍硬规则拦截 + 超限强制输出带安全警告） |
+| 独有创新 | AI QA 自建引擎 | Agentic RAG 检索循环、时效硬管控、三路意图分流、多模态影像分析 |
 | 详见 | [7.1 ~ 7.7](#71-项目概述) | [8.1 ~ 8.8](#81-项目定位) |
 
 > 💡 两个项目一教育一医疗，从不同安全等级验证了多智能体架构的落地方式，形成"理论 → 教育 → 医疗"的完整学习路径。
@@ -2243,56 +2243,64 @@ Ragas 真正将 RAG 应用的测试从"凭感觉"变成"靠数据"。通过忠�
 
 # 七、实战项目
 
-本章通过两个真实项目，将前六章的理论知识串联起来，形成从"学"到"用"的闭环。两个项目分别对应**教育**和**医疗**两种不同安全等级的场景，便于对比学习。
+本章以 **LearnAgent** 这一个真实项目为载体，将前六章的理论知识串联起来，形成从"学"到"用"的闭环。LearnAgent 是面向脑卒中医学教育的多智能体个性化学习系统，既具备教育场景的个性化能力，又因深耕脑卒中领域而带有医学场景的严谨校验，因此分两章展开：
 
-| 项目 | 场景 | 安全等级 | 核心架构 | 详见 |
-|------|------|----------|----------|------|
-| LearnAgent | 个性化教育 | 容错较高 | 6 专家并行 + 双重校验 | [7.1 ~ 7.7](#71-项目概述) |
-| 脑卒中 CDSS | 临床急救 | 零容忍 | 双轴矩阵 + 自愈反思 | [8.1 ~ 8.8](#81-项目定位) |
+| 视角 | 侧重 | 核心架构 | 详见 |
+|------|------|----------|------|
+| 系统全貌 | 三层架构、9 专家协同、Hybrid RAG、双层校验、记忆机制 | LangGraph 状态图 + 9 专家动态编排 + 双层校验 | [7.1 ~ 7.8](#71-项目概述) |
+| 医学深度能力 | 医学多模态影像、领域输入守卫、辩论仲裁、共享记忆 | VisionNode + 输入守卫 + 辩论仲裁 + 共享记忆 | [8.1 ~ 8.8](#81-项目定位) |
 
 ---
 
 ## 7.1 项目概述
 
-LearnAgent 是基于 LangGraph 多智能体协同推理 + Hybrid RAG 的高等教育个性化学习模型推理层，以 FastAPI 异步框架为服务底座。系统强调 **"证据先行、过程可解释、结果可验证"**。
+LearnAgent 是面向脑卒中医学教育的多智能体个性化学习系统，采用前后端分离 + 模型服务独立部署的三层架构：Vue 3 前端、Spring Boot 3.3（Java 21）后端、FastAPI + LangGraph（Python 3.11）模型推理层。系统以学生画像为起点，提供学习资源生成、路径规划、循证辅导、学习评估、医学影像分析和代码辅助，并通过 SSE 展示可审计的推理节点与最终结果。系统强调 **"证据先行、过程可解释、结果可验证"**。
+
+> ⚠️ 本系统用于教学辅助，不替代教师指导或临床诊疗意见。
 
 **技术栈**：
 
 | 类别 | 技术 | 说明 |
 |------|------|------|
-| Web 框架 | FastAPI 0.128 + Uvicorn | 高性能异步 Web 服务 |
-| 智能体编排 | LangGraph 0.2 + LangChain 0.2 | 状态图驱动的多智能体推理 |
-| 大语言模型 | Qwen-Max / Qwen-Plus / Qwen-Turbo | 阿里云百炼平台多级模型 |
-| 向量检索 | ChromaDB 0.5 + DashScope Embedding | 语义向量检索 |
-| 关键词检索 | BM25 (rank-bm25) | 专业术语精准匹配 |
-| 重排模型 | DashScope gte-rerank | 深度语境重排与证据压缩 |
-| PDF 解析 | pdfplumber + pypdf | 课程文档加载与分块 |
-| 视觉分析 | DashScope MultiModalConversation | 图片识别与多模态分析 |
-| 文献检索 | PubMed NCBI API | 学术文献外部补充检索 |
-| 配置管理 | PyYAML + 动态配置加载器 | 专家角色/规则/参数/Prompt 模板 |
-| 认证安全 | PyJWT | JWT Token 双向认证 |
+| 前端 | Vue 3.5 + Vite 7 + Pinia 3 + marked + DOMPurify | 页面、状态管理、SSE 流式渲染、Markdown 清洗 |
+| 后端 | Java 21 + Spring Boot 3.3.13 + WebFlux + MyBatis-Plus | 鉴权、业务、持久化、SSE 转发 |
+| Web 框架（模型层） | FastAPI 0.128 + Uvicorn + sse-starlette | 高性能异步 Web 服务，17 个内部端点 |
+| 智能体编排 | LangGraph 1.2 + LangChain 1.3 | 状态图驱动的多智能体推理 |
+| 大语言模型 | qwen-max / qwen-plus / qwen-turbo | 阿里云百炼平台三级模型矩阵 |
+| 向量检索 | ChromaDB 1.5 + qwen3.7-text-embedding | 语义向量检索（recall_k=20） |
+| 关键词检索 | BM25 (rank-bm25 0.2.2) | 专业术语精准匹配（recall_k=20） |
+| 融合与重排 | RRF (k=60) + qwen3-rerank | 倒数排名融合 + 深度语境重排（top_k_final=3） |
+| PDF 解析 | pdfplumber 0.11.9 + pypdf 4.3.1 | 课程文档加载与递归分块（512/128） |
+| 视觉分析 | qwen-vl-max | 医学影像识别、检验报告/处方 OCR、多图对比 |
+| 数据存储 | MySQL 8（14 张表）+ Redis 7 | 业务数据持久化、Token/限流/会话缓存 |
+| 配置管理 | PyYAML + 动态配置加载器 | 专家角色/规则/参数/Prompt/模板/共享记忆 |
+| 认证安全 | PyJWT + 内部 JWT | 后端签发内部 JWT，模型层 `/model/get_result` 校验 |
 
 ---
 
 ## 7.2 项目目录结构
 
+LearnAgent 仓库由 `frontend/`、`backend/server/`、`model/` 三端组成，外加 `docs/` 文档与 `docker-compose.yml` 编排。下面给出模型推理层 `model/` 的核心结构（前后端结构见根 README）：
+
 ```
 model/
 ├── app/
-│   ├── main.py                     # FastAPI 服务入口（路由 + 资源初始化）
+│   ├── main.py                     # FastAPI 服务入口（路由注册 + 资源初始化）
+│   ├── runtime.py                  # 运行时上下文与生命周期管理
 │   │
 │   ├── agents/                     # 多智能体核心模块
 │   │   ├── orchestrators/          # LangGraph 编排层
 │   │   │   ├── clinical_graph.py   # LearningGraphBuilder 状态图构建
-│   │   │   ├── qwen_agent.py       # LearningAgent 主入口（流式推理）
+│   │   │   ├── xf_xinghuo_agent.py # 讯飞星火 Agent 兼容入口
 │   │   │   └── nodes/              # 推理节点
 │   │   │       ├── base.py         # BaseNode 节点基类
-│   │   │       ├── intent_node.py  # 意图分类节点（7 种意图路由）
-│   │   │       ├── analysis_node.py # 需求分析节点
-│   │   │       ├── retrieve_node.py # 证据检索节点
-│   │   │       ├── reason_node.py  # 多智能体并行推理节点
-│   │   │       ├── validate_node.py # 质量校验节点（规则+反思）
-│   │   │       └── report_node.py  # 报告生成节点
+│   │   │       ├── intent_node.py  # 输入守卫 + 意图分类节点
+│   │   │       ├── analysis_node.py # 需求分析与难度评估节点
+│   │   │       ├── vision_node.py  # 医学影像分析节点（有图片时启用）
+│   │   │       ├── retrieve_node.py # Hybrid RAG 证据检索节点
+│   │   │       ├── reason_node.py  # 9 专家动态编排 + 辩论仲裁节点
+│   │   │       ├── validate_node.py # 质量校验节点（规则+反思+退火）
+│   │   │       └── report_node.py  # 模式化报告生成节点
 │   │   ├── pipelines/              # 处理管道
 │   │   │   └── rag_pipeline.py     # RAG 检索-重排-合成管道
 │   │   ├── services/               # 智能体服务
@@ -2301,62 +2309,80 @@ model/
 │   │   │   └── synthesis_service.py # 证据合成服务
 │   │   ├── core/                   # 核心定义
 │   │   │   ├── schema.py           # LearningState / LearningContext 数据模型
+│   │   │   ├── shared_memory.py    # 共享记忆系统（物理层+逻辑层+元记忆过滤）
 │   │   │   ├── decorators.py       # 装饰器工具
 │   │   │   ├── exceptions.py       # 异常定义
 │   │   │   └── result.py           # 结果封装
 │   │   ├── infra/                  # 基础设施
-│   │   │   ├── reranker.py         # DashScope gte-rerank 重排器
+│   │   │   ├── reranker.py         # qwen3-rerank 重排器
 │   │   │   └── base_reranker.py    # 重排器基类
 │   │   ├── schemas/                # 数据模式
 │   │   │   └── retrieval.py        # RerankResult 检索结果模式
 │   │   ├── utils/                  # 工具函数
 │   │   │   ├── llm_helper.py       # LLM 调用辅助
 │   │   │   ├── json_parser.py      # JSON 解析器
-│   │   │   ├── retry.py            # 重试装饰器
+│   │   │   ├── reasoning_trace.py  # 推理轨迹构建
 │   │   │   └── text_utils.py       # 文本处理工具
 │   │   ├── assistant.py            # LearningAssistant 学习助手
 │   │   └── constants.py            # 常量定义
 │   │
 │   ├── rag/                        # RAG 模块
-│   │   ├── retrievers.py           # 混合检索引擎（DashScope Embedding + ChromaDB + BM25）
-│   │   ├── data_loader.py          # PDF 文档加载与递归分块
+│   │   ├── retrievers.py           # 混合检索引擎（qwen3.7-embedding + ChromaDB + BM25 + RRF）
+│   │   ├── data_loader.py          # PDF 文档加载与递归分块（512/128，规则边界保护）
 │   │   ├── qa_generator.py         # AI Batch QA 自动衍生引擎
 │   │   └── retrieve.py             # 统一检索入口
 │   │
 │   ├── config/                     # YAML 配置中心
 │   │   ├── config_loader.py        # 动态配置加载器（支持热更新）
+│   │   ├── qwen.py                 # Qwen 模型与 DashScope 客户端封装
 │   │   ├── prompts.yaml            # Prompt 模板库
-│   │   ├── expert_config.yaml      # 专家角色配置（6 个智能体角色）
-│   │   ├── report_templates.yaml   # 报告模板（画像/资源/辅导/评估等）
-│   │   ├── rules_config.yaml       # 校验规则配置（质量规则 + 反思参数）
-│   │   └── limits_config.yaml      # 参数限制配置（子问题数/证据长度/关键词等）
+│   │   ├── expert_config.yaml      # 专家角色配置（9 个智能体 + 辩论仲裁）
+│   │   ├── report_templates.yaml   # 报告模板（8 种资源 + 画像/辅导/评估/路径/代码）
+│   │   ├── rules_config.yaml       # 校验规则配置（质量规则 + 反思参数 + 退火）
+│   │   ├── limits_config.yaml      # 参数限制配置（子问题数/证据长度/关键词等）
+│   │   └── shared_memory_config.yaml # 共享记忆参数（熵阈值/共识/持久化）
 │   │
-│   ├── services/                   # 外部服务
-│   │   ├── vision_service.py       # 视觉分析服务（DashScope 多模态）
-│   │   └── pubmed_service.py       # PubMed 学术文献检索服务
+│   ├── routers/                    # FastAPI 路由层（17 个内部端点）
+│   │   ├── stream.py               # 统一推理入口 /model/get_result（SSE）
+│   │   ├── profile.py              # 画像对话与抽取
+│   │   ├── medical.py              # 医学影像与 OCR
+│   │   ├── code.py                 # 代码辅助
+│   │   ├── evaluation.py           # 学习评估
+│   │   └── admin.py                # 配置热更新与健康检查
 │   │
-│   ├── evaluation/                 # 评估模块
+│   ├── services/                   # 业务服务
+│   │   ├── agent_runner.py         # 图执行与 SSE 事件聚合（token/replace）
+│   │   ├── vision_service.py       # 视觉分析服务（qwen-vl-max）
+│   │   ├── medical_vision_service.py # 医学影像门控与多图对比
+│   │   ├── medical_ocr_service.py  # 检验报告/处方 OCR
+│   │   ├── vision_rag_bridge.py    # 影像发现与 RAG 证据桥接
+│   │   ├── profile_extractor.py    # 画像 8 维抽取
+│   │   └── code_sandbox.py         # Python 代码执行沙箱
+│   │
+│   ├── schemas/                    # 请求/响应模型
+│   │   └── medical_image.py        # 医学影像请求模型
+│   │
+│   ├── evaluation/                 # 评估模块（预留）
 │   │
 │   └── utils/                      # 通用工具
 │       ├── context_summary.py      # 对话上下文摘要与 all_info 更新
 │       ├── error_codes.py          # 错误码定义与错误事件构建
 │       ├── token_aggregator.py     # Token 聚合器
 │       ├── naming_model.py         # 对话命名模型（自动生成对话标题）
+│       ├── task_manager.py         # 异步任务管理（状态查询与续传）
 │       └── download_models.py      # 模型下载脚本
 │
 ├── data/
-│   └── documents/                  # 课程 PDF 文档库（系统启动时自动索引）
+│   ├── documents/                  # 脑卒中指南 PDF 文档库（系统启动时自动索引）
+│   └── agent_reputation.json       # 专家信誉分持久化
 │
-├── tests/                          # 自动化测试
-│   ├── test_api_client.py          # API 客户端测试
-│   ├── test_rag.py                 # RAG 功能测试
-│   └── ...
+├── tests/                          # 自动化测试（93 项）
 │
 ├── requirements.txt                # Python 依赖清单
-├── main.py                         # 启动入口
+├── pytest.ini                      # 测试配置
 ├── start.bat                       # Windows 一键启动脚本
 ├── start.sh                        # Linux/macOS 一键启动脚本
-└── .env.example                    # 环境变量示例
+└── Dockerfile                      # Python 3.11 slim 镜像
 ```
 
 ---
@@ -2367,17 +2393,18 @@ model/
 
 | 项目模块 | 对应理论章节 | 设计依据 |
 |----------|-------------|----------|
-| `orchestrators/clinical_graph.py` | 三、LangGraph 框架 | 用 StateGraph 构建状态机，条件边实现意图路由与校验路由 |
-| `nodes/intent_node.py` | 一、架构与设计模式 → Router/Classifier | Router 模式：根据意图分类分发至不同处理管道 |
-| `nodes/validate_node.py` | 一、架构与设计模式 → Evaluator-Optimizer | 评估器-优化器循环：校验不通过则退回重推理 |
-| `nodes/reason_node.py` | 四、多智能体系统 | 6 个专家智能体并行推理，模拟教育团队协作 |
-| `pipelines/rag_pipeline.py` | 五、工程实践 → Hybrid RAG | 双路混合检索 + 深度重排 + 证据压缩与溯源 |
+| `orchestrators/clinical_graph.py` | 三、LangGraph 框架 | 用 StateGraph 构建状态机，条件边实现意图路由、影像分支与校验路由 |
+| `nodes/intent_node.py` | 一、架构与设计模式 → Router/Classifier | 输入守卫 + Router 模式：领域/功能校验后按意图分发 |
+| `nodes/validate_node.py` | 一、架构与设计模式 → Evaluator-Optimizer | 评估器-优化器循环：校验不通过则退回重推理并退火权重 |
+| `nodes/reason_node.py` | 四、多智能体系统 | 9 专家动态编排 + 并行推理 + 辩论（1 轮）+ 仲裁 |
+| `nodes/vision_node.py` | 一、架构与设计模式 → Tool Use | 医学影像门控与 qwen-vl-max 多模态分析 |
+| `pipelines/rag_pipeline.py` | 五、工程实践 → Hybrid RAG | 双路混合检索 + RRF 融合 + qwen3-rerank 重排 + 溯源 |
 | `rag/qa_generator.py` | 五、工程实践 → Hybrid RAG | AI QA 自建引擎，"反向做题"提升召回率 |
-| `config/rules_config.yaml` | 五、工程实践 → 反思循环 | 最大反思次数、规则引擎开关、LLM 反思开关 |
-| `config/expert_config.yaml` | 四、多智能体系统 | 角色定义、优先级、系统提示词 |
-| `evaluation/` | 六、RAG评估 | 可接入 Ragas 框架进行 RAG 管线评估 |
+| `config/rules_config.yaml` | 五、工程实践 → 反思循环 | 最大反思次数、规则引擎开关、LLM 反思开关、退火因子 |
+| `config/expert_config.yaml` | 四、多智能体系统 | 9 角色定义、适用意图、优先级、辩论仲裁配置 |
+| `evaluation/` | 六、RAG评估 | 预留接入 Ragas 框架进行 RAG 管线评估 |
 | `core/schema.py` | 三、LangGraph → State | LearningState 定义了全图共享的数据结构 |
-| `core/shared_memory.py` | 三、LangGraph → Memory | 物理层 + 逻辑层 + 元记忆过滤的多轮对话记忆 |
+| `core/shared_memory.py` | 三、LangGraph → Memory | 物理层 + 逻辑层 + 元记忆过滤的跨会话共享记忆 |
 
 ---
 
@@ -2387,50 +2414,57 @@ model/
 
 前端发来学习请求（可能附带图片），Java 后端鉴权通过后建立 SSE 长连接，WebClient 异步调用本模型服务。
 
-### 7.4.2 意图识别与智能路由
+### 7.4.2 输入守卫与意图路由
 
-Intent Node 利用 Qwen-Turbo 对输入进行意图分类，支持 7 种路由：
+IntentNode 先做输入守卫（领域校验 + 功能校验 + LLM 辅助判断），再利用 Qwen-Turbo 进行意图分类。代码辅助的功能选择由 `【辅助功能代码】complete|diagnose|optimize|explain` 结构化传递，不依赖模型猜测。路由结果如下：
 
 | 意图类型 | 路由目标 | 说明 |
 |----------|----------|------|
-| `irrelevant` | Reject Node → END | 非教育学习相关，拒绝处理 |
-| `knowledge` | KnowledgeAnswer → END | 通用教育知识询问，直接回答 |
-| `profile` | 完整推理链 | 学习画像构建/更新 |
-| `resource` | 完整推理链 | 个性化学习资源生成 |
-| `tutor` | 完整推理链 | 智能辅导问答 |
-| `assessment` | 完整推理链 | 学习效果评估 |
-| `learning_path` | 完整推理链 | 学习路径规划 |
+| `non_stroke` / `irrelevant` | Reject → END | 与脑卒中学习无关，拒绝处理 |
+| `knowledge` | KnowledgeAnswer → END | 通用脑卒中知识询问，单次直接回答 |
+| `code_assist` | GenerateReport → END | 代码辅助，绕过临床分析链，直接走专用报告模板 |
+| `profile` | Analysis → … → Report | 学习画像构建/更新 |
+| `resource` | Analysis → … → Report | 个性化学习资源生成（8 种互斥类型） |
+| `tutor` | Analysis → … → Report | 智能辅导问答（支持图片） |
+| `assessment` | Analysis → … → Report | 学习效果评估 |
+| `learning_path` | Analysis → … → Report | 学习路径规划 |
+
+> 完整推理链：Analysis →（有图片则 Vision）→ Retrieve → Reason → Validate → GenerateReport。
 
 ### 7.4.3 学习需求结构化分析
 
-Analysis Node 对输入进行结构化分析，提取关键学习要素：
-- 学生基本信息（专业、年级、当前课程）
+AnalysisNode 对输入进行结构化分析，提取关键学习要素并评估难度（`difficulty_score`）：
+- 学生基本信息（专业、年级、当前课程，特别是神经病学相关）
 - 知识基础与薄弱环节
 - 认知风格与资源偏好
 - 学习目标与易错点模式
 
+`difficulty_score` 会影响后续 ReasonNode 的活跃专家集合（专家按 `min_difficulty` 门槛动态筛选）。
+
 ### 7.4.4 Hybrid RAG 证据检索
 
-Retrieve Node 调用混合检索引擎从课程知识库中检索相关内容：
-- **语义向量检索**：基于 DashScope text-embedding-v2 向量化 + ChromaDB 存储
-- **关键词精准检索**：基于 BM25 算法匹配专业术语
-- **深度重排**：gte-rerank 对混合结果进行深度语境打分与证据压缩
+RetrieveNode 调用混合检索引擎从脑卒中指南知识库中检索相关内容（三阶漏斗）：
+- **语义向量检索**：qwen3.7-text-embedding 向量化 + ChromaDB 存储（recall_k=20）
+- **关键词精准检索**：BM25 算法匹配专业术语（recall_k=20）
+- **RRF 融合**：倒数排名融合（k=60），统一两路结果（rrf_top_k=20）
+- **深度重排**：qwen3-rerank 对融合结果深度语境打分（top_k_final=3）
 - **明确溯源**：每条证据附带来源文献名称与页码
+- **降级策略**：向量失败继续 BM25，重排失败返回 RRF 顺序；结果按 `MD5(query+top_k)` 缓存 300 秒
 
-### 7.4.5 多智能体并行推理
+### 7.4.5 多智能体动态编排与辩论仲裁
 
-Reason Node 汇集精准证据片段，驱动 6 个专家智能体并行推理：
-- 画像对话智能体 → 特征抽取智能体 → 需求分析智能体
-- 文档撰写智能体 → 题目生成智能体 → 质量审核智能体
+ReasonNode 汇集精准证据片段，按意图映射 + 难度门槛动态筛选活跃专家（9 位专家中选取子集），并行推理：
+- 画像对话、特征抽取、需求分析、文档撰写、题目生成、质量审核、学习激励、医学影像分析、仲裁
 
-各专家独立产出建议后，按优先级加权综合生成 Proposal 和 Critique。
+各专家独立产出建议后，若启用辩论（`debate.enabled=true`，`max_rounds=1`），专家间进行 1 轮交叉质询，再由仲裁智能体依据证据链裁决分歧，最终综合生成 Proposal 和 Critique。综合阶段按意图附加模式约束，避免资源/画像/辅导/评估/路径输出混型。
 
-### 7.4.6 双重校验与反思循环
+### 7.4.6 双层校验与有界反思循环
 
-Validate Node 对推理结果进行双重校验：
-- **规则引擎检查**：快速匹配质量规则（内容相关性、难度匹配、维度覆盖等）
-- **LLM 反思校验**：深层次教育逻辑审查，检查教学原则违反
-- **反思循环**：校验失败时自动触发 Reason Node 重新推理，最多 3 次
+ValidateNode 对推理结果进行双层校验：
+- **规则引擎检查**：按资源生成/画像构建/学习路径三类禁忌规则快速匹配
+- **LLM 反思校验**：只检查严重事实、逻辑、教学或医学问题，返回 PASS/REJECT 并给出驳回分类（`factual_error`/`logical_contradiction`/`personalization_insufficient`/`medical_inaccuracy`/`completeness_issue`）
+- **退火权重**：校验失败时对责任专家权重衰减（`weight_decay_factor=0.5`），并携带修正提示回到 ReasonNode 重新推理
+- **有界反思**：`max_reflection_count=1`，超限则强制输出（附带风险提示）；校验异常或结果模糊时默认放行（可用性优先）
 
 ### 7.4.7 报告生成与流式输出
 
@@ -2446,85 +2480,103 @@ Report Node 根据 `report_mode` 选择对应模板，生成结构化学习分�
 
 ### 全局约定
 
-- **Base URL**：`http://localhost:8000`
-- **认证方式**：部分接口需携带 JWT Token，与 Java 后端共享密钥双向认证
-- **流式协议**：SSE（Server-Sent Events），Content-Type: `text/event-stream`
+- **对外接口**：浏览器只应访问 Java 后端的 `/api/**`（14 个控制器、64 个端点）。Python `/model/**` 是内部接口（17 个端点），不应直接暴露到公网。
+- **内部鉴权**：模型层仅 `/model/get_result` 显式校验内部 JWT（后端签发，密钥与 `AI_API_SHARED_JWT_SECRET` 一致）；其他专用路由依赖 Docker/内网隔离。
+- **流式协议**：SSE（Server-Sent Events），Content-Type: `text/event-stream`。Java 后端 `AIStreamingServiceImpl` 将历史上下文限制为最近 8000 字符，单条上游 SSE 行限制 1 MiB，读取超时 300 秒。
 
 ### SSE 流式事件格式
 
-| 事件类型 | 说明 | data 结构 |
-|----------|------|-----------|
-| `init` | 连接建立，返回会话 ID | `{"type":"init","talkId":"123","newTalk":true}` |
-| `node_start` | 智能体节点开始推理 | `{"type":"node_start","node":"profiler","label":"正在分析学习特征..."}` |
-| `token` | 内容片段（增量） | `{"type":"token","content":"..."}` |
-| `done` | 流式结束 | `{"type":"done","talkId":"123","title":"学习画像构建"}` |
-| `error` | 错误 | `{"type":"error","code":"E2001","message":"..."}` |
+| 事件类型 | 说明 | 前端合并规则 |
+|----------|------|--------------|
+| `init` | 连接建立，返回会话 ID | 记录 talkId |
+| `node_start` | 智能体节点开始推理 | 折叠展示推理步骤 |
+| `node_done` | 智能体节点完成 | 标记步骤完成 |
+| `token` / `chunk` / `result` | 内容片段（增量） | 追加到 content |
+| `replace` | 完整报告（覆盖增量草稿） | **替换**累计 content，不可再次追加 |
+| `done` | 流式结束 | 返回 talkId、content、可选画像维度 |
+| `error` | 错误 | 抛出可展示错误 |
 
-### 对话式学习画像
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/model/profile/conversation` | 对话式画像构建（SSE 流式） |
-| GET | `/model/profile` | 获取当前学习画像 |
-| PUT | `/model/profile/dimensions` | 手动更新画像维度 |
-| GET | `/model/profile/conversations` | 获取画像对话列表 |
-| GET | `/model/profile/conversation/{talk_id}` | 获取画像对话历史 |
-| DELETE | `/model/profile/conversation/{talk_id}` | 删除画像对话 |
-
-### 多智能体协同资源生成
+### 对话式学习画像（Java `/api/profile/**` → Python `/model/profile/**`）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/model/resources/generate` | 综合资源生成（SSE 流式） |
-| POST | `/model/resources/generate/document` | 生成课程讲解文档（SSE 流式） |
-| POST | `/model/resources/generate/mindmap` | 生成知识点思维导图（SSE 流式） |
-| POST | `/model/resources/generate/quiz` | 生成练习题目（SSE 流式） |
-| POST | `/model/resources/generate/reading` | 生成拓展阅读材料（SSE 流式） |
-| POST | `/model/resources/generate/video-script` | 生成教学视频脚本（SSE 流式） |
-| POST | `/model/resources/generate/code-practice` | 生成代码实操案例（SSE 流式） |
-| GET | `/model/resources` | 获取资源列表（分页/筛选） |
-| GET | `/model/resources/{id}` | 获取资源详情 |
-| GET | `/model/resources/{id}/download` | 下载资源文件 |
-| DELETE | `/model/resources/{id}` | 删除资源 |
+| POST | `/api/profile/conversation` | 对话式画像构建（SSE 流式） |
+| GET | `/api/profile` | 获取当前学习画像 |
+| PUT | `/api/profile/dimensions` | 手动更新画像维度 |
+| GET | `/api/profile/conversations` | 获取画像对话列表 |
+| GET | `/api/profile/conversation/{talk_id}` | 获取画像对话历史 |
+| DELETE | `/api/profile/conversation/{talk_id}` | 删除画像对话 |
 
-### 个性化学习路径
+> 画像抽取在原画像对话完成后异步触发（`/model/profile/extract`），不额外创建"画像生成"对话。
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/model/learning-path/generate` | 生成个性化学习路径 |
-| GET | `/model/learning-path` | 获取学习路径列表 |
-| GET | `/model/learning-path/{path_id}` | 获取学习路径详情 |
-| PUT | `/model/learning-path/{path_id}/steps/{step_id}/progress` | 更新步骤进度 |
-| POST | `/model/learning-path/recommend` | 个性化资源推送 |
-| POST | `/model/learning-path/{path_id}/adjust` | 动态调整学习路径 |
+### 多智能体协同资源生成（Java `/api/resources/**`）
 
-### 智能辅导
+统一生成入口支持 8 种互斥类型，由 `report_mode` 约束输出：
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/model/tutor/ask` | 智能辅导问答（SSE 流式，支持图片） |
-| GET | `/model/tutor/conversations` | 获取辅导对话列表 |
-| GET | `/model/tutor/conversation/{talk_id}` | 获取辅导对话历史 |
-| DELETE | `/model/tutor/conversation/{talk_id}` | 删除辅导对话 |
-
-### 学习效果评估
+| report_mode | 资源类型 |
+|------|------|
+| `document_generate` | 课程讲解文档 |
+| `mindmap_generate` | 知识点思维导图 |
+| `quiz_generate` | 练习题目 |
+| `reading_generate` | 拓展阅读（临床指南与文献） |
+| `case_study_generate` | 临床案例 |
+| `plan_generate` | 学习方案 |
+| `code_practice_generate` | 代码实操案例 |
+| `assessment_generate` | 学习评估报告 |
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/model/evaluation/behavior` | 提交学习行为数据 |
-| GET | `/model/evaluation/report` | 获取学习效果评估报告 |
-| POST | `/model/evaluation/quiz/{quiz_id}/submit` | 提交练习答案 |
-| GET | `/model/evaluation/mastery-heatmap` | 获取知识点掌握度热力图 |
-| POST | `/model/evaluation/optimize` | 触发学习方案动态优化 |
+| POST | `/api/resources/generate` | 综合资源生成（SSE 流式） |
+| POST | `/api/resources/generate/{type}` | 按类型生成（SSE 流式） |
+| GET | `/api/resources` | 获取资源列表（分页/筛选） |
+| GET | `/api/resources/{id}` | 获取资源详情 |
+| DELETE | `/api/resources/{id}` | 删除资源 |
 
-### 辅助接口
+### 个性化学习路径（Java `/api/learning-path/**`）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/model/get_result` | 兼容旧版推理接口（SSE 流式） |
-| POST | `/ai/analyze` | 学习风险快速分析 |
+| POST | `/api/learning-path/generate` | 生成个性化学习路径 |
+| GET | `/api/learning-path` | 获取学习路径列表 |
+| GET | `/api/learning-path/{path_id}` | 获取学习路径详情 |
+| PUT | `/api/learning-path/{path_id}/steps/{step_id}/progress` | 更新步骤进度 |
+| POST | `/api/learning-path/recommend` | 个性化资源推送 |
+| POST | `/api/learning-path/{path_id}/adjust` | 动态调整学习路径 |
+
+### 智能辅导（Java `/api/tutor/**`）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/tutor/chat` | 智能辅导问答（SSE 流式，支持图片和代码片段） |
+| GET | `/api/tutor/conversations` | 获取辅导对话列表 |
+| GET | `/api/tutor/conversation/{talk_id}` | 获取辅导对话历史 |
+| DELETE | `/api/tutor/conversation/{talk_id}` | 删除辅导对话 |
+
+### 学习效果评估（Java `/api/evaluation/**`）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/evaluation/generate` | 生成学习评估报告（SSE 流式） |
+| GET | `/api/evaluation/reports` | 获取评估报告列表 |
+| POST | `/api/evaluation/optimize` | 触发学习方案动态优化 |
+
+### 代码辅助与医学影像（Java `/api/code/**`、`/api/medical/**`）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/code/execute` | Python 代码执行 |
+| POST | `/api/code/assist` | 代码补全/诊断/优化/讲解（四种互斥模式） |
+| POST | `/api/medical/**` | 医学影像分析、病例流式分析、多图对比、DICOM 预览、检验报告/处方 OCR |
+
+### 内部接口（Python `/model/**`，不对外）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/model/get_result` | 统一推理入口（SSE 流式，校验内部 JWT） |
+| GET | `/model/tasks/{task_id}` | 异步任务状态查询 |
+| GET | `/model/tasks/{task_id}/stream` | 按事件索引续接收 |
 | POST | `/admin/reload_config` | 配置热更新 |
-| GET | `/admin/report_modes` | 获取可用报告模式 |
+| GET | `/admin/report_modes` | 获取可用报告模式（健康检查） |
 
 ---
 
@@ -2534,28 +2586,37 @@ Report Node 根据 `report_mode` 选择对应模板，生成结构化学习分�
 
 ### `config/expert_config.yaml` — 专家角色配置
 
-定义多智能体协作系统中的智能体角色、职责和系统提示词：
+定义多智能体协作系统中的 9 位智能体角色、适用意图、最低难度门槛、优先级和系统提示词，并配置辩论与仲裁：
 
 ```yaml
 experts:
-  - role: "画像对话智能体"
-    instruction: "请与学生进行自然对话，引导其表达学习背景..."
-    system_prompt: "你是专业的学习画像构建顾问..."
-    priority: 1
+  - role: "画像对话智能体"      # priority: 1, min_difficulty: 0.0
+  - role: "特征抽取智能体"      # priority: 2, min_difficulty: 0.2
+  - role: "需求分析智能体"      # priority: 3, min_difficulty: 0.3
+  - role: "文档撰写智能体"      # priority: 4, min_difficulty: 0.4
+  - role: "题目生成智能体"      # priority: 5, min_difficulty: 0.4
+  - role: "质量审核智能体"      # priority: 6, min_difficulty: 0.5
+  - role: "学习激励智能体"      # priority: 7, min_difficulty: 0.0（情感陪伴）
+  - role: "仲裁智能体"          # priority: 8, min_difficulty: 0.6（裁决分歧）
+  - role: "医学影像分析智能体"  # priority: 3.5, min_difficulty: 0.3（影像-临床关联）
 
-  - role: "特征抽取智能体"
-    instruction: "请从对话内容中抽取结构化特征..."
-    priority: 2
+debate:
+  enabled: true
+  max_rounds: 1
+  arbitrator_role: "仲裁智能体"
 
-synthesis:
-  prompt_template: |
-    作为教学总监，请统筹以下各位智能体的意见...
-  opinion_separator: "【{role}建议】{opinion}\n"
+dynamic_orchestration:
+  enabled: true
+  intent_expert_mapping:        # 按意图映射活跃专家子集
+    profile: [画像对话, 特征抽取, 学习激励]
+    resource: [需求分析, 文档撰写, 题目生成, 质量审核, 学习激励]
+    tutor: [画像对话, 需求分析, 医学影像分析, 质量审核, 学习激励]
+    # ... assessment / learning_path 同理
 ```
 
 ### `config/rules_config.yaml` — 校验规则配置
 
-定义质量规则与反思参数：
+定义质量规则、反思参数与退火策略：
 
 ```yaml
 contraindication_rules:
@@ -2566,14 +2627,26 @@ contraindication_rules:
   画像构建:
     - 未覆盖核心维度
     - 描述不具体
+    - 水平评估无依据
   学习路径:
     - 阶段划分不合理
     - 时间估算不可行
+    - 缺少评估节点
 
 validation_settings:
-  max_reflection_count: 3
+  max_reflection_count: 1       # 有界反思上限
   enable_rule_engine: true
   enable_llm_reflection: true
+
+annealing:
+  enabled: true
+  weight_decay_factor: 0.5      # 校验失败时责任专家权重衰减
+  category_correction_prompts:  # 5 类驳回的专用修正提示
+    factual_error: ...
+    logical_contradiction: ...
+    personalization_insufficient: ...
+    medical_inaccuracy: ...
+    completeness_issue: ...
 ```
 
 ### `config/limits_config.yaml` — 参数限制配置
@@ -2598,78 +2671,88 @@ keywords:
 
 ## 7.7 快速启动
 
-### 环境准备
+### Docker Compose（推荐）
+
+环境要求：Docker Desktop 或 Docker Engine，且本机可访问 DashScope 与阿里云 OSS。
+
+```bash
+cp .env.example .env
+# 编辑 .env，填写真实密钥
+docker compose up -d --build
+docker compose ps
+```
+
+启动完成后访问 `http://127.0.0.1:5173`。Docker 默认只向宿主机暴露前端端口：
+
+| 服务 | 容器端口 | 宿主机端口 | 说明 |
+|:---|:---:|:---:|:---|
+| frontend | 80 | 5173 | 页面和 `/api` 反向代理 |
+| backend | 8080 | 不暴露 | 仅 Compose 网络访问 |
+| model | 8000 | 不暴露 | 仅后端访问；健康检查 `/admin/report_modes` |
+| mysql | 3306 | 不暴露 | 数据卷 `mysql-data` |
+| redis | 6379 | 不暴露 | Token、限流等状态 |
+
+### 必需环境变量
+
+| 变量 | 用途 |
+|:---|:---|
+| `DB_PASSWORD` | MySQL root 密码 |
+| `DASHSCOPE_API_KEY` | Qwen Chat、Embedding、Rerank、VL 调用 |
+| `AI_API_SHARED_JWT_SECRET` | 后端签发内部 JWT；Compose 将同一值映射为模型层 `SECRET_KEY` |
+| `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` | 阿里云 OSS 上传 |
+| `OSS_ENDPOINT` / `OSS_BUCKET` / `OSS_REGION` | OSS 地址、Bucket 和区域 |
+
+> 手动启动时，模型层使用 `SECRET_KEY`，后端使用 `AI_API_SHARED_JWT_SECRET`，两者必须相同；后端通过 `AI_API_URL` 指向模型服务。
+
+### 手动启动（模型层）
 
 ```bash
 conda create -n learn-agent python=3.11
 conda activate learn-agent
 pip install -r requirements.txt
+
+# Windows PowerShell 若默认代码页非 UTF-8，运行测试前先执行：
+$env:PYTHONUTF8 = "1"
+
+python -m app.main   # 或 start.bat / start.sh
 ```
 
-### 环境变量配置
+服务默认监听 `0.0.0.0:8000`。模型服务首次启动需要加载 `data/documents/` 中的脑卒中指南 PDF，并初始化 BM25 和向量库。
 
-在 `model/` 根目录下创建 `.env` 文件：
+### 知识库建设
 
-```env
-# 必需：阿里云百炼 API 密钥
-DASHSCOPE_API_KEY=sk-您的阿里云百炼平台密钥
-
-# 必需：JWT 认证密钥（须与后端 shared-jwt-secret 一致）
-SECRET_KEY=自定义防越权的JWT随机字符串
-
-# 可选：HuggingFace 镜像加速（国内网络建议配置）
-HF_ENDPOINT=https://hf-mirror.com
-```
-
-### 课程知识库建设
-
-将课程相关的 PDF 文件放入 `data/documents/` 文件夹。系统首次启动时自动执行：
-1. 递归分块（512 字长 + 128 字重叠）
+将脑卒中相关 PDF 放入 `data/documents/`。系统首次启动时自动执行：
+1. 规则边界保护 + 递归分块（512 字长 + 128 字重叠，合并小于 100 字的块）
 2. AI Batch QA 衍生（自动生成 Q&A 对并标注页码）
-3. 混合双索引编织（向量化 + BM25 索引）
-
-### 启动服务
-
-```bash
-# Windows
-start.bat
-
-# Linux/macOS
-bash start.sh
-
-# 或直接运行
-python main.py
-```
-
-服务默认监听 `0.0.0.0:8000`。启动时按顺序初始化 7 个步骤：加载配置 → 初始化 LLM → 构建 RAG 引擎 → 加载模板 → 初始化助手 → 初始化 Agent → 初始化视觉服务。
+3. 混合双索引编织（qwen3.7-embedding 向量化 + BM25 索引）
 
 ---
 
 ## 7.8 模型记忆力机制与上下文存储
 
-### 7.8.1 三级患者记忆体系
+### 7.8.1 三级学生记忆体系
 
-系统模拟人类认知过程，构建了三级患者记忆架构：
+系统模拟人类认知过程，构建了三级学生记忆架构：
 
 | 层级 | 名称 | 类比 | 存储内容 | 生命周期 |
 |------|------|------|----------|----------|
 | 第一层 | 短期工作记忆 | 感觉记忆 | 当前对话轮次的实时信息 | 单轮对话 |
 | 第二层 | 情景记忆 | 海马体 | 历次对话的关键事件摘要 | 对话级 |
-| 第三层 | 语义记忆 | 新皮层 | 患者的稳定知识画像 | 持久级 |
+| 第三层 | 语义记忆 | 新皮层 | 学生的稳定学习画像（8 维） | 持久级 |
 
 **记忆构建流程**：
 
 ```
-MemoryNode 激活
+AnalysisNode 激活
     │
-    ├── 短期记忆: 从 LearningState 中提取当前轮次信息
+    ├── 短期记忆: 从 LearningState.case_text 中提取当前轮次信息
     │
     ├── 情景记忆: 从 all_info.history 中提取历史对话摘要
     │
-    └── 语义记忆: 从 all_info.profile 中提取患者画像
+    └── 语义记忆: 从 all_info.profile 中提取学生画像
     │
     ▼
-AnalysisNode 融合三级记忆 + case_text → 结构化上下文
+AnalysisNode 融合三级记忆 + case_text → 结构化上下文 + difficulty_score
 ```
 
 **all_info 数据结构**：
@@ -2677,11 +2760,14 @@ AnalysisNode 融合三级记忆 + case_text → 结构化上下文
 ```json
 {
   "profile": {
-    "专业": "临床医学",
-    "年级": "大三",
-    "认知风格": "视觉型",
-    "薄弱点": ["神经解剖", "药理学"],
-    "学习目标": "掌握脑卒中诊疗流程"
+    "knowledgeBase": "神经解剖薄弱、药理学掌握较好",
+    "cognitiveStyle": "视觉型",
+    "learningGoal": "掌握脑卒中诊疗流程",
+    "errorPattern": ["溶栓适应症混淆"],
+    "learningPace": "每周 8 小时",
+    "resourcePreference": ["思维导图", "临床案例"],
+    "clinicalExperience": "见习阶段",
+    "emotionState": "积极"
   },
   "history": [
     {"round": 1, "summary": "学生询问了脑卒中分类...", "key_points": [...]},
@@ -2690,6 +2776,8 @@ AnalysisNode 融合三级记忆 + case_text → 结构化上下文
   "current": "当前轮次的对话内容"
 }
 ```
+
+> 画像 8 维由 `profile_extractor.py` 从对话历史抽取，持久化到 `student_profile` 表；抽取过程不创建额外对话。
 
 ### 7.8.2 对话上下文摘要（滑动窗口）
 
@@ -2730,10 +2818,11 @@ Python FastAPI SSE 流式输出
 
 | 表 | 存储内容 | 关键字段 |
 |------|----------|----------|
-| `cont` | 对话容器 | patientId, createTime, status |
-| `talk` | 对话记录 | contId, role, content, allInfo, createTime |
+| `talk` | 对话记录 | id, user_id, content（首行写 `[[conversation-type:<type>]]` 标记）, role, create_time |
+| `cont` | 对话容器 | user_id, create_time, status |
+| `student_profile` | 学生画像（8 维） | user_id, dimensions（JSON） |
 
-**关键约束**：`talk.patientId` 不可切换，防止记忆串患者，确保医疗安全。
+**对话隔离约束**：画像、资源和代码辅助对话在 `talk.content` 首行写入 `[[conversation-type:<type>]]` 标记；控制器复用 `talkId` 前校验用户归属和业务类型，避免不同功能错误串话。
 
 ### 7.8.4 LangGraph 状态管理与检查点
 
@@ -2745,7 +2834,7 @@ from langgraph.checkpoint.memory import MemorySaver
 checkpointer = MemorySaver()
 graph = builder.compile(checkpointer=checkpointer)
 
-config = {"configurable": {"thread_id": patient_id}}
+config = {"configurable": {"thread_id": talk_id}}
 result = graph.invoke(initial_state, config)
 ```
 
@@ -2753,25 +2842,28 @@ result = graph.invoke(initial_state, config)
 
 | 字段 | 写入节点 | 读取节点 | 含义 |
 |------|----------|----------|------|
-| `intent_type` | IntentNode | 后续所有节点 | 意图分类结果 |
-| `difficulty_score` | AnalysisNode | ReasonNode | 决定仲裁是否加入 |
+| `intent_type` | IntentNode | 后续所有节点、路由函数 | 意图分类结果 |
+| `difficulty_score` | AnalysisNode | ReasonNode | 决定活跃专家集合（按 `min_difficulty` 筛选） |
 | `evidence` | RetrieveNode | ReasonNode, ReportNode | RAG 检索证据 |
-| `agent_weights` | ValidateNode | ReasonNode | 退火衰减权重 |
-| `debate_history` | ReasonNode | 后续节点 | 累计辩论记录 |
-| `arbitration_result` | ReasonNode | 后续节点 | 仲裁裁决 |
-| `consensus_result` | ReasonNode | 后续节点 | 共识投票结果 |
-| `reflection_count` | ValidateNode | 路由函数 | 反射次数控制 |
+| `active_experts` | ReasonNode | ValidateNode | 本轮活跃专家子集 |
+| `expert_advices` | ReasonNode | 综合阶段 | 各专家独立意见 |
+| `debate_history` | ReasonNode | 仲裁、后续节点 | 辩论记录（最多 1 轮） |
+| `consensus_result` | ReasonNode | 后续节点 | 共识/仲裁结果 |
+| `agent_weights` | ValidateNode | ReasonNode | 退火衰减权重（`weight_decay_factor=0.5`） |
+| `rejection_categories` | ValidateNode | ReasonNode | 驳回分类（5 类） |
+| `reflection_count` | ValidateNode | 路由函数 | 反思次数控制（上限 1） |
 | `validation_feedback` | ValidateNode | ReasonNode | 驳回原因 + 修正指引 |
+| `vision_findings` | VisionNode | ReasonNode, ReportNode | 影像结构化发现 |
 
 ### 7.8.5 共享记忆系统
 
-三级患者记忆解决"单次会话内如何组织患者信息"的问题，而 **共享记忆系统** 解决"跨会话、跨智能体如何沉淀与复用高价值知识"的问题。两者互补。
+三级学生记忆解决"单次会话内如何组织学生信息"的问题，而 **共享记忆系统** 解决"跨会话、跨智能体如何沉淀与复用高价值知识"的问题。两者互补。
 
 **系统公式**：**共享记忆系统 = 存储介质（物理层） + 交换协议（网络层） + 共识对齐（逻辑层）**
 
 | 层次 | 机制 | 核心类 | 解决的问题 |
 |------|------|--------|-----------|
-| 物理层 | 向量库持久化存储 | `SharedMemoryStore` | 高价值信息跨会话保留 |
+| 物理层 | 向量库持久化存储 | `SharedMemoryStore` | 高价值信息跨会话保留（独立 Qwen Chroma 集合，与指南库隔离） |
 | 逻辑层 | 信任加权投票共识 | `ConsensusEngine` + `AgentReputationStore` | 多智能体意见冲突消解 |
 | 元记忆过滤 | 信息熵计算 | `MetaMemoryFilter` | 垃圾记忆拦截，防止存储资源浪费 |
 
@@ -2780,9 +2872,11 @@ result = graph.invoke(initial_state, config)
 | 维度 | 权重 | 含义 | 过滤目标 |
 |:---|:---:|:---|:---|
 | **Shannon 熵** | 0.2 | 字符分布均匀度 | 过滤乱码/重复字符 |
-| **关键词密度** | 0.3 | 45个领域关键词命中率 | 过滤无关闲聊 |
+| **关键词密度** | 0.3 | 领域关键词命中率 | 过滤无关闲聊 |
 | **Token 密度** | 0.3 | 唯一 token 占比 | 过滤空洞废话 |
 | **长度得分** | 0.2 | 信息充实度 | 过滤过短无意义文本 |
+
+> 综合熵分低于 `entropy_threshold=0.85` 时允许持久化；显式向量检索失败时通过 Chroma `query_texts` 再试（非 BM25）；完全失败时跳过，不阻断主流程。
 
 **全链路集成数据流**：
 
@@ -2797,13 +2891,13 @@ result = graph.invoke(initial_state, config)
 
 **两套记忆体系的协作关系**：
 
-| 维度 | 三级患者记忆 | 共享记忆系统 |
+| 维度 | 三级学生记忆 | 共享记忆系统 |
 |------|------------|------------|
-| 粒度 | 单患者维度 | 跨患者、跨会话维度 |
+| 粒度 | 单学生维度 | 跨学生、跨会话维度 |
 | 生命周期 | 对话级（随对话结束而失效） | 持久级（跨重启保留） |
 | 数据来源 | 数据库结构化字段 | 多智能体推理过程中产生的洞察 |
 | 存储介质 | Java 内存 → 请求体传递 → Python 状态 | ChromaDB 向量库 + JSON 信誉文件 |
-| 读取方式 | MemoryNode 直接消费 | RetrieveNode 向量检索命中 |
+| 读取方式 | AnalysisNode 直接消费 | RetrieveNode 向量检索命中 |
 
 **配置驱动**：
 
@@ -2834,21 +2928,22 @@ persistence:
 | 设计点 | 决策 | 原因 |
 |--------|------|------|
 | 记忆分层 | 短期/情景/语义三级 | 模拟人类认知过程，区分临时对话、历史事件、稳定知识 |
-| all_info 存储 | 前端持有，不后端持久化 | 简化后端状态管理，避免额外存储表 |
+| all_info 存储 | 前端持有，请求体传递 | 简化后端状态管理，跨轮次由前端带回 |
+| 画像抽取 | 对话完成后异步抽取，不建额外对话 | 避免画像对话与生成对话混淆 |
 | 摘要触发策略 | 长度阈值（2000字）滑动窗口 | 比逐轮评分更高效，减少 LLM 调用次数 |
-| 对话-患者绑定 | talk.patientId 不可切换 | 防止记忆串患者，确保医疗安全 |
+| 对话隔离 | talk.content 首行写 `[[conversation-type]]` 标记 | 防止不同功能串话，复用 talkId 前校验归属 |
 | 检查点存储 | 内存 MemorySaver | 当前单实例部署足够，后续可切换为持久化后端 |
-| 持久化方式 | 异步 + Redis 重试队列 | 不阻塞 SSE 流关闭，保证用户体验 |
+| 持久化方式 | 异步 + 重试 | 不阻塞 SSE 流关闭，保证用户体验 |
 | 截断策略 | 中间省略式（保留首尾） | 在有限上下文窗口内保留最关键的首尾信息 |
-| 共享记忆过滤 | 四维熵值模型 | 多维度综合评判信息价值，避免单一指标误判 |
-| 共识机制 | 信誉加权投票 | 区分专家能力差异，高信誉意见优先 |
-| 信誉更新 | 精准定位责任方 | 校验失败时仅惩罚权重最低的 1/3 专家 |
+| 共享记忆过滤 | 四维熵值模型（阈值 0.85） | 多维度综合评判信息价值，避免单一指标误判 |
+| 共识机制 | 信誉加权投票（冲突阈值 0.4） | 区分专家能力差异，高信誉意见优先 |
+| 信誉更新 | 校验通过/失败后按活跃专家更新 | 精准反馈专家表现，持久化到 `agent_reputation.json` |
 
 ---
 
 # 八、实战项目：脑卒中 CDSS
 
-本章是第七章的姊妹篇，以"多智能体深度检索脑卒中临床辅助决策支持系统（CDSS）"为实战案例，展示 AI 应用在**高安全要求医疗场景**中的落地实践。与 LearnAgent（教育场景）相比，本项目在多智能体架构、时效管控、多模态推理等方面有显著创新，可作为对比学习。
+本章是第七章的姊妹篇，以"多智能体深度检索脑卒中临床辅助决策支持系统（CDSS）"为实战案例，展示 AI 应用在**高安全要求医疗场景**中的落地实践。与 LearnAgent（教育场景）相比，本项目在多智能体架构、Agentic RAG 检索循环、时效管控、多模态推理等方面有显著创新，可作为对比学习。
 
 > ⚠️ 本系统属于临床辅助决策参考系统（CDSS），系统生成的输出结果不代表最终临床诊断，亦不能替代专业医生的独立医学判断。最终诊疗决策必须由执业医师根据患者实际临床体征做出。
 
@@ -2856,16 +2951,15 @@ persistence:
 
 ## 8.1 项目定位
 
-本项目是一个面向**脑卒中（Stroke）临床急救与连续管理场景**的智能医疗辅助决策支持系统（CDSS），以大语言模型为核心，深度融合**检索增强生成（RAG）、双轴矩阵多智能体推理（Multi-Agent System）与多模态医学知识库**，实现了从患者急诊接入、症状/影像输入到辅助分析、医嘱推荐及长期随访的完整闭环。
+本项目是一个面向**脑卒中（Stroke）临床急救与连续管理场景**的智能医疗辅助决策支持系统（CDSS），以大语言模型为核心，深度融合**Agentic RAG 检索循环、双轴矩阵多智能体推理（Multi-Agent System）与多模态医学知识库**，实现了从患者急诊接入、症状/影像输入到辅助分析、医嘱推荐及长期随访的完整闭环。
 
-与传统通用问答系统不同，本项目并非简单依赖模型参数记忆生成结果，而是以权威医学文献与临床指南为知识底座，通过"**极速/安全双通道分流—多模态动态检索—多智能体交叉重排—自愈式反思推理—自动化评估**"的结构化流程，使每一次回答都具备明确证据来源与逻辑依据。系统强调"**证据先行、过程可解释、结果可验证、时效硬管控**"。
+与传统通用问答系统不同，本项目并非简单依赖模型参数记忆生成结果，而是以权威医学文献与临床指南为知识底座，通过"**三路意图分流—Agentic RAG 主动检索循环—多专家独立意见→交叉质询→主持人共识—双层校验反思—结构化报告**"的完整流程，使每一次回答都具备明确证据来源与逻辑依据。系统强调"**证据先行、过程可解释、结果可验证、时效硬管控**"。
 
 ### 面向用户群体
 
 | 用户群体 | 核心需求 |
 |----------|----------|
 | 👨‍⚕️ 临床医生与急诊团队 | 快速查阅指南、分析急诊病例、DNT 时效追踪、精确诊疗与用药建议 |
-| 🎓 医学教学与医学生 | 基于真实脱敏病例自动衍生考核病例，帮助住培医生理解鉴别诊疗思路 |
 | 🩺 患者持续健康管理 | 个体化健康数据动态整合、二级预防与医疗随访 |
 
 ---
@@ -2874,59 +2968,69 @@ persistence:
 
 ### （一）智能问诊与 AI 辅助分析模块（含急诊绿道）
 
-- **结构化医学推理**：输入症状/病史后，先进行医学问题理解与任务拆解，再检索获取证据，最终多智能体推理生成结构化结果
+- **结构化医学推理**：输入症状/病史后，先进行医学问题理解与任务拆解，再通过 Agentic RAG 主动检索循环获取证据，最终多智能体推理生成结构化结果
 - **全维临床视角**：输出包括"最可能诊断及依据、解剖定位分析、病理机制解释、置信度评估、需排除的重要诊断"
-- **时效动态追踪（急诊绿色通道模式）**：识别疑似急性缺血性脑卒中（AIS）时，自动启动**发病时间窗倒计时**与 **DNT 计时器**，实时高亮"距溶栓窗口关闭还剩 X 分钟"
-- **流式交互体验**：支持流式输出，用户实时看到 AI 推理思考过程与阶段性结果
+- **时效动态追踪（急诊绿色通道模式）**：Java 后端 `StrokeAssessmentModule` 实现结构化绿道预评估，`StrokeAssessmentEvaluator` 计算发病时间窗倒计时与 DNT 计时器，前端 `GreenwayWorkspace` 实时高亮"距溶栓窗口关闭还剩 X 分钟"
+- **流式交互体验**：通过 SSE 协议逐步传递 `node_start` / `node_done` / `token` / `done` 标准事件，前端 `ThinkingPanel` 折叠展示推理步骤，`ChatWorkspace` 实时打字机渲染
 
-### （二）患者管理与个体化分析模块（含 EMR 自动生成）
+### （二）患者管理与个体化分析模块（含 FHIR 标准输出）
 
 - **长期档案维护**：记录患者基本信息、既往病史、用药史及医生备注
+- **三级患者记忆**：`PatientMemoryService` 在医生权限范围内组装**短期记忆**（当前会话）、**情景记忆**（历史健康数据与评估事件）和**语义记忆**（稳定病史与医生备注），Python 侧 `MemoryNode` 按层限制长度生成本轮 `active_memory`
 - **动态上下文联动**：补充新症状后自动结合历史记录综合分析，实现个体化风险评估
-- **结构化电子病历（EMR）对接**：自动将问诊结果转化为标准**出院小结**或**急诊首程病历**，支持 CDA/FHIR 国际医疗数据标准，可对接院内 HIS 系统
+- **FHIR 标准输出**：`StrokeAssessmentModule.exportFhir()` 将评估结果导出为 FHIR Bundle（含 Composition、Patient、Observation 资源），可对接院内 HIS 系统
+- **患者关联安全**：通过 `talk.patient_id` 持久化患者绑定，空对话可首次绑定一位患者，之后如需切换必须新建对话，从源头避免跨患者历史混入
 
 ### （三）医学多模态知识学习与文献检索模块
 
-- **本地与在线双擎**：内置权威脑卒中指南 + PubMed 在线接口
-- **RAG 强力支撑**：专业文献通过文档解析、语义分块和向量化索引，使 AI 输出严格建立在真实医学资料基础上
-- **离线语音查房记录**：支持语音口述 → ASR + NLP → 结构化文本输入
+- **本地与在线双擎**：内置权威脑卒中指南（ChromaDB 向量库）+ PubMed 在线接口（`PubMedService`）
+- **Agentic RAG 检索循环**：`ResearchPlanNode` 主动拆分检索任务并生成 HyDE 描述，`EvidenceJudgeNode` 评估证据充分性，不足时 `QueryRewriteNode` 改写查询再次检索，默认最多两轮
+- **Hybrid RAG 强力支撑**：ChromaDB 语义向量 + BM25 关键词精准匹配，RRF 融合排序 + gte-rerank 深度重排，QA 自建引擎自动衍生 Q&A 对提升召回率
 
-### （四）医学教学与科研考核模块
+### （四）多模态影像分析模块
 
-- **全自动医学双盲数字病例生成器**：基于真实脱敏病例自动衍生具有"多维迷惑性陷阱"的模拟病例（如隐蔽的溶栓绝对禁忌症、微调化验单指标、修改发病时间窗）
-- **智能考评反馈**：考核住培医生的鉴别诊断能力与急诊响应速度，给出步骤扣分项与详细考评报告
+- **智能意图分流**：`VisionAnalysisService` 根据关键词自动识别影像类型（检验报告 `image_report` / 药品识别 `image_drug` / 通用影像 `image_general`），加载对应专科提示词
+- **检验报告解读**：Qwen-VL-Max 对检验报告单进行 OCR 识别 → 异常指标解读 → 综合分析
+- **药品识别与安全**：识别药品包装，提供适应症、用法用量、不良反应、禁忌症及药物相互作用风险
 
-> 💡 四大模块并非独立存在——智能问诊负责实时分析与时效决策，患者管理提供动态个体化数据并输出标准病历，医学知识模块提供权威多模态证据来源，教学科研模块作为应用延伸与能力验证。四者共同构成"**数据—知识—推理—决策—教学**"的完整链路。
+> 💡 四大模块并非独立存在——智能问诊负责实时分析与时效决策，患者管理提供动态个体化数据并输出标准病历，医学知识模块提供权威多模态证据来源，多模态影像模块扩展了系统的感知边界。四者共同构成"**数据—知识—推理—决策**"的完整链路。
 
 ---
 
-## 8.3 三层系统架构
+## 8.3 三层系统架构与 LangGraph 状态图
 
 本项目采用前后端分离与模型服务独立部署的**三层架构**：
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│                          前端交互层 (Vue 3 / SSE)                          │
+│                       前端交互层 (Vue 3 / SSE)                            │
 │ ┌──────────────────┐  ┌────────────────────┐  ┌─────────────────────────┐ │
-│ │ 绿道时效倒计时面板 │  │ 多模态影像/报告预览 │  │ 思考过程与病历流式渲染   │ │
+│ │ GreenwayWorkspace │  │ ChatWorkspace      │  │ ThinkingPanel           │ │
+│ │ 绿道时效倒计时面板 │  │ 多模态影像/报告预览 │  │ 推理步骤折叠展示        │ │
 │ └─────────┬────────┘  └──────────┬─────────┘  └────────────▲────────────┘ │
 └───────────┼──────────────────────┼─────────────────────────┼──────────────┘
-            │ (RESTful / WebSocket)│                         │ (SSE 流式响应)
+            │ (RESTful + SSE)      │                         │ (SSE 流式响应)
 ┌───────────▼──────────────────────▼─────────────────────────┴──────────────┐
-│                    后端服务层 (Spring Boot / WebFlux)                     │
+│                  后端服务层 (Spring Boot 3.3 / WebFlux)                   │
 │ ┌──────────────────┐  ┌────────────────────┐  ┌─────────────────────────┐ │
-│ │  安全认证 (JWT)   │  │  分布式锁并发控制   │  │ WebClient 响应式转发引擎 │ │
+│ │  安全认证 (JWT)   │  │ Redisson 并发控制   │  │ WebClient 响应式转发    │ │
+│ │  StrokeAssessment │  │ PatientMemoryService│  │ AIStreamingServiceImpl  │ │
+│ │  Module (绿道评估) │  │ (三级患者记忆)      │  │ (SSE 流式转发)          │ │
 │ └─────────┬────────┘  └──────────┬─────────┘  └────────────▲────────────┘ │
 └───────────┼──────────────────────┼─────────────────────────┼──────────────┘
             │                      │                         │ (Async Generator)
 ┌───────────▼──────────────────────▼─────────────────────────┴──────────────┐
-│                    模型推理服务层 (FastAPI / Python)                       │
+│                  模型推理服务层 (FastAPI / Python / LangGraph)             │
 │  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │ 混合检索 (ChromaDB+BM25) ──► gte-rerank 重排 ──► 证据精准溯源      │  │
+│  │ Agentic RAG: ResearchPlan → Retrieve → EvidenceJudge → Rewrite     │  │
 │  ├─────────────────────────────────────────────────────────────────────┤  │
-│  │ 多模态视觉网关 (Qwen-VL-Max): 解析 ASPECTS 评分与化验单            │  │
+│  │ Hybrid 检索: ChromaDB + BM25 → RRF 融合 → gte-rerank 重排         │  │
 │  ├─────────────────────────────────────────────────────────────────────┤  │
-│  │ 双轴矩阵多智能体协同网络 (LangGraph): Proposer-Critic-Integrator    │  │
+│  │ 多智能体会诊: Reason(独立意见) → Debate(交叉质询) → Consensus(共识) │  │
+│  ├─────────────────────────────────────────────────────────────────────┤  │
+│  │ 双层校验: Validate(规则引擎 + LLM反思) → Report(结构化报告)        │  │
+│  ├─────────────────────────────────────────────────────────────────────┤  │
+│  │ 多模态视觉网关: Qwen-VL-Max (检验报告/药品识别/通用影像)           │  │
 │  └─────────────────────────────────────────────────────────────────────┘  │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
@@ -2935,9 +3039,67 @@ persistence:
 
 | 层级 | 技术栈 | 核心职责 |
 |------|--------|----------|
-| 前端交互层 | Vue 3 | 绿道倒计时面板、多模态影像预览、流式渲染、语音录入 |
-| 后端服务层 | Spring Boot / WebFlux | JWT 认证、分布式锁并发控制、WebClient 响应式转发 |
-| 模型推理服务层 | FastAPI / Python | 混合检索 + 重排、多模态视觉网关、双轴矩阵多智能体推理 |
+| 前端交互层 | Vue 3 + Vite 7 + Pinia | 绿道倒计时面板、多模态影像预览、ThinkingPanel 推理步骤展示、流式打字机渲染 |
+| 后端服务层 | Java 21 + Spring Boot 3.3 + WebFlux + Redis + MySQL | JWT 认证、Redisson 分布式锁并发控制、WebClient 响应式 SSE 转发、绿道结构化预评估、三级患者记忆组装 |
+| 模型推理服务层 | Python 3.11+ + FastAPI + LangGraph | Agentic RAG 检索循环、Hybrid 混合检索+重排、多专家会诊(Reason→Debate→Consensus)、双层校验反思、多模态视觉网关 |
+
+### LangGraph 临床推理状态图
+
+这是系统核心的 LangGraph 状态流转图，包含**两个有界循环**：
+
+```text
+Intent
+  ├─ irrelevant ─────────────────────────────────────────► Reject → END
+  ├─ knowledge ──────────────────────────────────────────► KnowledgeAnswer → END
+  └─ consultation
+        │
+        ▼
+      Memory ─► Analysis ─► ResearchPlan ─► Retrieve ─► EvidenceJudge
+                                                     ▲          │
+                                                     │          ├─ 不足且未达上限 → Rewrite
+                                                     └──────────┘
+                                                                │
+                                                                ▼ 充足
+                  Report ◄── Validate ◄── Consensus ◄── Debate ◄── Reason
+                     │            │                       ▲
+                     ▼            └─ retry ───────────────┘
+                    END              (携带反馈重新会诊)
+```
+
+**两个有界循环**：
+
+1. **Agentic RAG 检索循环**：`EvidenceJudgeNode` 评估证据不足时，`QueryRewriteNode` 改写查询并再次检索，默认最多 2 轮
+2. **会诊反思循环**：`ValidateNode` 校验未通过时，携带反馈重新进入 `ReasonNode`，最大反思次数可配置
+
+### ClinicalState 核心状态字段
+
+```python
+class ClinicalState(TypedDict):
+    case_text: str                    # 患者病例文本
+    patient_memory: Dict[str, str]    # 三级患者记忆
+    active_memory: str                # 本轮激活的记忆上下文
+    intent_type: str                  # 意图类型 (consultation/knowledge/irrelevant)
+    context: Dict                     # 结构化临床上下文
+    clinical_questions: List[str]     # 临床子问题
+    retrieval_tasks: List[Dict]       # 检索任务列表
+    retrieval_queries: List[str]      # 检索查询列表
+    retrieved_queries: List[str]      # 已检索查询（去重用）
+    hypothetical_document: str        # HyDE 假设性文档
+    need_retrieve: bool               # 是否需要继续检索
+    evidence_quality: float           # 证据质量评分
+    evidence_assessment: str          # 证据评估描述
+    missing_information: List[str]    # 证据缺口
+    retrieval_round: int              # 当前检索轮次
+    expert_opinions: Dict[str, str]   # 各专家独立意见
+    debate_transcript: str            # 交叉质询记录
+    consensus: str                    # 主持人共识
+    proposal: str                     # 综合治疗提案
+    critique: str                     # 批判性审查意见
+    validation_passed: bool           # 是否通过校验
+    validation_feedback: str          # 校验反馈
+    reflection_count: int             # 反思次数
+    report: str                       # 最终报告
+```
 
 ---
 
@@ -2945,76 +3107,115 @@ persistence:
 
 这是本项目最核心的创新——**业务专家轴（纵向）× 决策行为轴（横向）**的双轴矩阵架构，模拟三甲医院真实的"科室会诊"与"三级把关"流程。
 
-```
-                    【 决策行为轴 (横向 LangGraph 拓扑) 】
-                     Proposer             Critic            Integrator
-                  (方案生成智能体)     (风险审查智能体)    (整合反思智能体)
-                  ┌─────────────────┐ ┌───────────────┐  ┌────────────────┐
-全科医生 (GP) ───►│ 初始全科病情评估 │ │ 基础高危筛查  │  │                │
-神经专家 (NS) ───►│ TOAST分型/时间窗│ │ 神经禁忌症挖掘│──►│ 最终结构化决策  │
-临床药师 (CP) ───►│ 药物联合配伍方案 │ │ 溶栓出血风险  │  │  (合规临床报告) │
-                  └─────────────────┘ └───────────────┘  └────────────────┘
-                            │                  │                  ▲
-                            └──────────────────┴── [校验失败拦截] ─┘
-                                                (触发异步自愈反思流)
+```text
+                    【 决策行为轴 (横向 LangGraph 拓扑演进) 】
+                   ReasonNode          DebateNode        ConsensusNode       ValidateNode
+                  (独立意见生成)      (交叉质询)         (主持人共识)        (双层校验)
+                  ┌─────────────────┐ ┌───────────────┐  ┌────────────────┐ ┌──────────────┐
+全科医生 (GP) ───►│ 初始全科病情评估 │ │ 阅读同伴意见  │  │                │ │              │
+神经专家 (NS) ───►│ TOAST分型/时间窗│ │ 指出冲突与遗漏│──►│ 裁决分歧       │─►│ 规则引擎硬拦截│
+临床药师 (CP) ───►│ 药物配伍方案    │ │ 修正专业结论  │  │ 形成共识+提案  │ │ LLM反思软审查│
+                  └─────────────────┘ └───────────────┘  └────────────────┘ └──────┬───────┘
+                           │                                       ▲                  │
+                           └──────────── retry (携带反馈) ─────────┘                  │
+                           (ValidateNode 校验失败 → 回到 ReasonNode 重新会诊)         │
+                                                                                       ▼
+                                                                                  ReportNode
+                                                                               (结构化报告)
 ```
 
 ### 纵向：医学专家角色定义
 
-| 专家角色 | 职责 |
-|----------|------|
-| **全科医生 Agent** | 全盘审视整体状态，提取主诉、既往史与慢病风险 |
-| **神经专科医生 Agent** | 核心决策大脑：特异性表现、NIHSS 评分、CT/MRI 多模态影像特征（ASPECTS评分）及溶栓/取栓时间窗硬管控 |
-| **临床药师 Agent** | 用药安全：审查检验报告单（INR、血小板），严审绝对/相对禁忌症及配伍风险 |
+| 专家角色 | 职责 | ReasonNode 产出 |
+|----------|------|-----------------|
+| **全科医生 Agent** | 全盘审视整体状态，提取主诉、既往史与慢病风险 | 全科病情评估意见 |
+| **神经专科医生 Agent** | 核心决策大脑：特异性表现、NIHSS 评分、CT/MRI 多模态影像特征（ASPECTS评分）及溶栓/取栓时间窗硬管控 | TOAST 分型与时间窗分析意见 |
+| **临床药师 Agent** | 用药安全：审查检验报告单（INR、血小板），严审绝对/相对禁忌症及配伍风险 | 药物配伍与安全审查意见 |
 
-### 横向：Proposer-Critic-Integrator 拓扑
+### 横向：Reason → Debate → Consensus → Validate 拓扑
 
-| 决策阶段 | 职责 | 关键行为 |
-|----------|------|----------|
-| **Proposer（生成）** | 三大专家并行产出初步诊疗子方案 | 各专家独立推理，产出专业领域方案 |
-| **Critic（审查）** | 独立执行"盲审" | 识别时间窗陷阱、多模态禁忌症硬碰撞、出血风险等 6 大类高风险点 |
-| **Integrator（反思）** | 主导融合专家方案与审查意见 | 若 Critic 提出的硬性规则未解决，触发拦截机制，自动拉回重试 |
+| 决策阶段 | 节点 | 职责 | 关键行为 |
+|----------|------|------|----------|
+| **Reason（独立意见）** | `ReasonNode` | 三大专家**并行**产出初步诊疗子方案 | `asyncio.gather` 并发调用各专家，收集 `expert_opinions` |
+| **Debate（交叉质询）** | `DebateNode` | 每位专家阅读同伴意见，指出冲突与遗漏 | 并行质询，产出 `debate_transcript` |
+| **Consensus（主持人共识）** | `ConsensusNode` | 主持人裁决分歧，形成三段式共识 | 输出 `consensus`（共识）+ `proposal`（提案）+ `critique`（审查） |
+| **Validate（双层校验）** | `ValidateNode` | 规则引擎硬拦截 + LLM 反思软审查 | 通过 → ReportNode；未通过 → 携带 `validation_feedback` 回到 ReasonNode |
+
+### 双层校验详解
+
+```python
+def _route_validation(self, state: ClinicalState) -> str:
+    if state['validation_passed']:
+        return "pass"       # → ReportNode 生成报告
+    elif state['reflection_count'] < self.max_reflection_count:
+        return "retry"      # → ReasonNode 重新会诊（携带 validation_feedback）
+    else:
+        return "fail"       # → ReportNode 强制输出（附带安全警告）
+```
+
+| 校验层 | 机制 | 作用 |
+|--------|------|------|
+| **第一层：规则引擎** | 硬编码禁忌症规则（如活动性出血 → 禁忌溶栓） | 零容忍硬拦截，不可绕过 |
+| **第二层：LLM 反思** | LLM 审查医疗逻辑完整性 | 软审查，发现遗漏则携带反馈回到 ReasonNode |
 
 ### 与 LearnAgent 的架构对比
 
 | 维度 | LearnAgent（第七章） | 脑卒中 CDSS（本章） |
 |------|---------------------|---------------------|
-| 多智能体架构 | 6 专家并行 → 加权综合 | 双轴矩阵：3 专家 × 3 决策阶段 |
-| 推理拓扑 | 并行推理 → 规则+LLM双重校验 | Proposer-Critic-Integrator 串并行混合 |
-| 反思机制 | 规则引擎 + LLM 反思（最多3次） | Critic 硬拦截 + Integrator 自愈反思流 |
-| 安全等级 | 教育场景（容错较高） | 医疗场景（零容忍硬规则拦截） |
+| 多智能体架构 | 6 专家并行 → 加权综合 | 双轴矩阵：3 专家 × 4 决策阶段 |
+| 推理拓扑 | 并行推理 → 规则+LLM双重校验 | Reason→Debate→Consensus→Validate 串并行混合 |
+| 反思机制 | 规则引擎 + LLM 反思（最多3次） | Validate 双层校验 + 有界反思循环（可配置次数） |
+| 安全等级 | 教育场景（容错较高） | 医疗场景（零容忍硬规则拦截 + 超限强制输出带安全警告） |
 
 ---
 
 ## 8.5 核心技术能力
 
-### 8.5.1 检索增强生成（RAG）机制
+### 8.5.1 Agentic RAG 检索循环
+
+与传统的"一次检索定终身"不同，本项目实现了**主动式 Agentic RAG 检索循环**，由四个节点协作完成：
+
+| 节点 | 职责 | 关键行为 |
+|------|------|----------|
+| `ResearchPlanNode` | 检索规划 | 将临床子问题拆分为检索任务，生成 HyDE 假设性文档提升语义召回 |
+| `RetrieveNode` | 执行检索 | Hybrid RAG 并行检索（ChromaDB + BM25），RRF 融合 + gte-rerank 重排 |
+| `EvidenceJudgeNode` | 证据评估 | 评估证据充分性，给出 `evidence_quality` 评分与 `missing_information` 缺口 |
+| `QueryRewriteNode` | 查询改写 | 证据不足时改写查询，携带已检索查询去重，再次进入 RetrieveNode |
+
+**有界循环**：默认最多 2 轮检索，防止无限循环。
+
+### 8.5.2 Hybrid RAG 混合检索与重排
 
 | 能力 | 实现方式 |
 |------|----------|
-| 混合检索 | 向量检索（ChromaDB）+ BM25 关键词检索并发，兼顾语义与术语精准 |
-| 指南优先 | 优先返回 AHA/ASA 指南、中国脑卒中诊疗指南等权威文献 |
+| 混合检索 | ChromaDB 语义向量 + BM25 关键词精准匹配并发，兼顾语义与术语精准 |
+| RRF 融合排序 | 倒数排名融合（Reciprocal Rank Fusion），统一两路检索结果 |
+| gte-rerank 深度重排 | 对候选证据深度语境相关性打分与二次排序 |
 | QA 自建引擎 | 精读医疗 PDF 自动衍生 Q&A 对（附带原文页码标签），提升急诊召回率 |
-
-### 8.5.2 证据重排与上下文优化
-
-| 能力 | 实现方式 |
-|------|----------|
-| 语义重排 | gte-rerank 对候选证据深度语境相关性打分与二次排序 |
-| 上下文压缩 | 限制证据长度并结构化聚合，防止"迷失在中间"现象 |
+| 指南优先 | 优先返回 AHA/ASA 指南、中国脑卒中诊疗指南等权威文献 |
 | 精准溯源标注 | 强制标注来源文献名称、章节、页码，100% 溯源验证 |
 
-### 8.5.3 医学多模态联合推理
+### 8.5.3 三级患者记忆
+
+| 记忆层级 | 内容 | 管理方 |
+|----------|------|--------|
+| **短期记忆** | 当前会话的交互记录 | Python 侧 `MemoryNode` |
+| **情景记忆** | 历史健康数据与评估事件 | Java 侧 `PatientMemoryService` |
+| **语义记忆** | 稳定病史与医生备注 | Java 侧 `PatientMemoryService` |
+
+`MemoryNode` 在医生权限范围内按层限制长度，组装本轮 `active_memory` 注入 `ClinicalState`，确保上下文窗口不被无关历史淹没。
+
+### 8.5.4 多模态影像分析
 
 | 能力 | 实现方式 |
 |------|----------|
-| ASPECTS 评分辅助 | Qwen-VL-Max 对急诊头颅 CT 的密度影、脑沟变浅区域进行视觉语义理解 |
-| 检验检查全景关联 | 自动读取血小板计数、凝血功能（INR）等报告单图片，转化为结构化文本 |
-| 智能意图分流 | 根据关键词自动识别影像类型（检验报告/药品识别/通用影像），加载对应专科提示词 |
+| 智能意图分流 | `VisionAnalysisService` 根据关键词自动识别影像类型（`image_report` / `image_drug` / `image_general`），加载对应专科提示词 |
+| 检验报告解读 | Qwen-VL-Max 对检验报告单进行 OCR 识别 → 异常指标解读 → 综合分析 |
+| 药品识别与安全 | 识别药品包装，提供适应症、用法用量、不良反应、禁忌症及药物相互作用风险 |
 
-### 8.5.4 流式推理与自动评测
+### 8.5.5 SSE 流式推理与自动评测
 
-- **Token 聚合机制**：通过 SSE 协议逐步传递 thinking + chunk + done 事件，对高频输出合并处理减少渲染压力
+- **SSE 标准事件流**：`node_start`（节点开始）→ `node_done`（节点完成）→ `token`（流式文本片段）→ `done`（整体完成），前端 `ThinkingPanel` 折叠展示推理步骤，`ChatWorkspace` 实时打字机渲染
 - **基于 RAGAS 框架的自动化评测**：从"回答相关性、事实一致性、上下文精准度"等维度量化追踪，评测驱动持续迭代
 
 ---
@@ -3025,60 +3226,59 @@ persistence:
 
 | 模型层级 | 模型实例 | 部署节点 | 设计考量 |
 |----------|----------|----------|----------|
-| **旗舰级** | Qwen-Max | Proposer（方案生成）、Integrator（综合决策） | 高参数确保临床推理深度与多步反思质量 |
-| **均衡级** | Qwen-Plus | Critic（风险审查）、上下文摘要 | 兼顾推理精度与响应速度，控制审查环节延迟 |
-| **极速级** | Qwen-Turbo | 意图识别、极速通道问答、命名模型 | 极低延迟响应，支撑高并发轻量级任务 |
+| **旗舰级** | Qwen-Max | ReasonNode（独立意见生成）、ConsensusNode（主持人共识）、ValidateNode（LLM 反思） | 高参数确保临床推理深度与多步反思质量 |
+| **均衡级** | Qwen-Plus | DebateNode（交叉质询）、EvidenceJudgeNode（证据评估）、上下文摘要 | 兼顾推理精度与响应速度，控制审查环节延迟 |
+| **极速级** | Qwen-Turbo | IntentNode（意图识别）、KnowledgeAnswer（知识问答）、QueryRewriteNode（查询改写） | 极低延迟响应，支撑高并发轻量级任务 |
 
 ---
 
-## 8.7 极速通道与安全通道双路径设计
+## 8.7 三路意图分流设计
 
-本项目首创**极速/安全双通道分流**机制，完美兼顾临床效率与医疗安全：
+本项目通过 `IntentNode` 实现**三路意图分流**，兼顾临床效率与医疗安全：
 
-```
+```text
 用户输入
   ↓
-意图识别 (Qwen-Turbo)
+IntentNode (Qwen-Turbo 意图识别)
   ↓
-  ┌────────────────────┐
-  ↓                    ↓
-极速通道              安全通道
-(通用知识问答)        (临床急诊病例)
-  ↓                    ↓
-单次检索+直接回答     多模态检索+双轴矩阵推理
-  ↓                    ↓
-SSE 流式输出          Critic 硬拦截 + Integrator 自愈
-                       ↓
-                      结构化临床报告
+  ├─ irrelevant ──► RejectNode (拒绝处理无关输入)
+  ├─ knowledge ───► KnowledgeAnswer (知识问答，单次检索直接回答)
+  └─ consultation ─► Memory → Analysis → Agentic RAG → Reason → Debate → Consensus → Validate → Report
+                     (完整临床推理流程)
 ```
 
-- **极速通道**：日常或时间极度敏感的通用问答，通过极速检索直接响应
-- **安全通道**：高风险、多模态的临床急诊病例，自动升维至多智能体协同推理模式
+| 意图类型 | 路由目标 | 处理方式 |
+|----------|----------|----------|
+| `irrelevant` | RejectNode | 直接拒绝，避免医疗资源浪费 |
+| `knowledge` | KnowledgeAnswer | 单次检索 + 直接回答，极速响应 |
+| `consultation` | 完整临床推理链 | Agentic RAG + 多智能体会诊 + 双层校验，确保安全 |
 
 ---
 
 ## 8.8 创新点与理论映射
 
-### 四大创新点
+### 五大创新点
 
 | 创新点 | 对应理论章节 | 创新说明 |
 |--------|-------------|----------|
-| 🏆 证据驱动的医学推理范式 | 一、RAG 设计模式 | 打破"先生成再解释"的医疗幻觉，证据获取前置，从"模型主导"向"证据主导"跨越 |
-| 🛡️ 多智能体协同安全拦截 | 四、多智能体系统 | 首创双轴矩阵架构，Critic 扮演严苛上级把关医师，配合状态机锁定与自愈循环拦截 |
-| ⏱️ 时效动态硬管控的绿道路径 | 一、Router/Classifier | 将"时间就是大脑"工程化，动态时间窗倒计时与 DNT 追踪，根据时间滴答调整推理优先级 |
-| ⚖️ 极速/安全双路径设计 | 一、Router/Classifier + Evaluator-Optimizer | 日常极速响应 vs 高风险多智能体推理，兼顾效率与安全 |
+| 🏆 Agentic RAG 主动检索循环 | 一、RAG 设计模式 + 五、工程实践 | 打破"一次检索定终身"，ResearchPlan→Retrieve→EvidenceJudge→Rewrite 四节点协作，证据不足自动改写再检索 |
+| 🛡️ 双轴矩阵多智能体架构 | 四、多智能体系统 + 三、LangGraph | 3 专家 × 4 阶段（Reason→Debate→Consensus→Validate），模拟三甲医院科室会诊流程 |
+| 🔒 双层校验有界反思循环 | 一、Evaluator-Optimizer + 五、反思循环 | 规则引擎零容忍硬拦截 + LLM 反思软审查，校验失败携带反馈回到 ReasonNode 重新会诊 |
+| ⏱️ 时效动态硬管控的绿道路径 | 一、Router/Classifier | 将"时间就是大脑"工程化，Java 后端结构化绿道预评估 + 前端实时倒计时 |
+| 🧠 三级患者记忆 | 五、工程实践 → 记忆管理 | 短期/情景/语义三层记忆，按权限与长度限制组装，避免上下文窗口被无关历史淹没 |
 
 ### 与前七章理论的完整映射
 
 | 项目能力 | 理论来源 | 落地方式 |
 |----------|----------|----------|
-| 意图路由（7路分发） | 一、Router/Classifier 模式 | Qwen-Turbo 意图识别 → 极速/安全双通道分流 |
-| 双轴矩阵推理 | 四、多智能体系统 + 三、LangGraph | 3 专家 × 3 阶段 = 9 节点状态机 |
-| Critic 硬拦截 | 一、Evaluator-Optimizer 循环 | 规则引擎硬拦截 + LLM 软审查双保险 |
-| 自愈反思流 | 五、反思循环落地指南 | Integrator 触发拦截 → 自动拉回 Proposer 重试 |
-| Hybrid RAG | 五、Hybrid RAG 工程实践 | ChromaDB + BM25 + gte-rerank + QA 自建引擎 |
-| 多模态联合推理 | —（本章新增实践） | Qwen-VL-Max 视觉网关 + ASR 语音转文本 |
-| 三级模型矩阵 | 五、工程实践 → 项目流程 | 旗舰/均衡/极速分级，算力与成本精细化管理 |
+| 三路意图分流 | 一、Router/Classifier 模式 | IntentNode → irrelevant/knowledge/consultation 三路路由 |
+| 双轴矩阵推理 | 四、多智能体系统 + 三、LangGraph | 3 专家 × 4 阶段 = 12 节点状态机 |
+| Agentic RAG 检索循环 | 一、RAG 设计模式 + 五、工程实践 | ResearchPlan→Retrieve→EvidenceJudge→Rewrite 有界循环 |
+| 双层校验反思 | 一、Evaluator-Optimizer 循环 | ValidateNode 规则引擎硬拦截 + LLM 反思软审查 |
+| Hybrid RAG | 五、Hybrid RAG 工程实践 | ChromaDB + BM25 + RRF 融合 + gte-rerank 重排 |
+| 三级患者记忆 | 五、工程实践 → 记忆管理 | 短期/情景/语义分层，MemoryNode 按权限组装 |
+| 多模态影像分析 | —（本章新增实践） | Qwen-VL-Max 视觉网关 + 智能意图分流 |
+| 三级模型矩阵 | 五、工程实践 → 项目流程 | Qwen-Max/Plus/Turbo 分级，算力与成本精细化管理 |
 | RAGAS 自动评测 | 六、RAG 评估 | 事实一致性、回答相关性、上下文精准度量化追踪 |
-| SSE 流式推送 | 三、LangGraph → Streaming | thinking + chunk + done 标准事件流 |
-| EMR 结构化输出 | —（本章新增实践） | CDA/FHIR 标准出院小结，对接 HIS 系统 |
+| SSE 流式推送 | 三、LangGraph → Streaming | node_start / node_done / token / done 标准事件流 |
+| FHIR 标准输出 | —（本章新增实践） | FHIR Bundle（Composition + Patient + Observation），对接 HIS 系统 |
