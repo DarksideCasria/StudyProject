@@ -2083,6 +2083,163 @@ rm -rf model/data/vector_stores/chroma_db_*  # 维度变了，必须重建
 | ChromaDB 初始化失败 | `__call__(texts)` 参数名不匹配 | 改为 `__call__(input)` 兼容接口 |
 | Windows 清理报 PermissionError | ChromaDB 文件锁未释放 | 重启进程后清理，或忽略该错误 |
 
+## 5.10 RAG 检索性能优化方法论
+
+> 本节从方法论角度系统梳理 RAG 检索阶段的性能优化优先级与策略，适用于任何领域的 RAG 系统。第八章将结合脑卒中 CDSS 项目展示具体落地。
+
+### 5.10.1 核心问题分析
+
+RAG 检索阶段的典型问题链：
+
+```
+用户查询 → Query Rewrite → Retriever → Vector DB → Top-K Evidence → LLM Reasoning
+```
+
+问题集中在：召回不相关文档、知识切片信息污染、Query 与知识库表达空间不一致、Top-K 中垃圾 chunk 占比高、缺少任务类型约束、检索结果无法支撑决策节点。
+
+> 本质：**Retrieval Precision 太低，而不是模型推理能力不足。**
+
+### 5.10.2 八大优化优先级
+
+按投入产出比从高到低排列：
+
+| 优先级 | 优化方向 | 解决的核心问题 |
+|--------|----------|----------------|
+| 1 | 优化 Chunk（知识切片） | 固定切分导致语义边界断裂、信息污染 |
+| 2 | Metadata 增强 | chunk 缺乏结构化语义标签 |
+| 3 | Query Understanding 优化 | 用户查询与知识库表达空间不一致 |
+| 4 | Hybrid Retrieval | 单一检索方式无法兼顾语义与术语 |
+| 5 | 增加 Reranker | Embedding 排序不够精准 |
+| 6 | Metadata Filtering | 全库搜索引入无关内容 |
+| 7 | 垃圾 Chunk 清洗 | 参考文献页/版权页/目录页污染召回 |
+| 8 | Evidence Hierarchy | 不同问题需要不同等级的证据 |
+
+### 5.10.3 第一优先级：优化 Chunk（语义切分）
+
+传统固定窗口切分导致一个指南中不同章节内容混在一起，Embedding 后向量表示的是"急性卒中指南"而非"抗凝启动时机"。
+
+**推荐策略：按语义边界切分**
+
+```
+章节 → 标题 → 小节 → 临床主题
+```
+
+示例：
+
+```
+原文：中国AIS指南 第三章 急性期治疗
+  3.1 静脉溶栓 / 3.2 血压管理 / 3.3 血管内治疗
+
+切分为：
+chunk1: title=急性缺血性卒中静脉溶栓, content=alteplase/4.5小时/禁忌症/推荐等级
+chunk2: title=AIS血压管理, content=185/110/180/105
+```
+
+### 5.10.4 第二优先级：Metadata 增强
+
+很多 chunk 只有文本内容，缺少"这是什么？用于什么？什么时候用？"的结构化标签。
+
+**推荐 Metadata Schema（医疗 RAG）**：
+
+```json
+{
+  "domain": "stroke",
+  "category": "diagnosis",
+  "topic": "LVO",
+  "decision": "mechanical_thrombectomy",
+  "evidence_type": "guideline",
+  "source": "AHA 2023",
+  "population": "acute ischemic stroke",
+  "stage": "emergency"
+}
+```
+
+**推荐 Metadata 维度**：
+
+| 维度 | 示例值 |
+|------|--------|
+| 疾病领域 | stroke / tumor / cardiology |
+| 临床阶段 | emergency / diagnosis / treatment / prevention / rehabilitation |
+| 决策类型 | diagnosis / differential diagnosis / therapy / drug / surgery / prognosis |
+| 证据类型 | guideline / RCT / meta-analysis / review / textbook |
+
+### 5.10.5 第三优先级：Query Understanding 优化
+
+用户原始查询直接 embedding 往往检索失败（如"72岁男性 房颤 失语 右偏瘫 NIHSS18"→ embedding 为"老人卒中"）。
+
+**Query 拆解**：增加 Query Planner，将原始查询拆解为多个子查询：
+
+```
+原始查询: 72岁男性 房颤 失语 右偏瘫 NIHSS18
+  → Q1: left MCA syndrome localization
+  → Q2: cardioembolic stroke TOAST criteria
+  → Q3: LVO CTA indication
+  → Q4: alteplase eligibility
+```
+
+**Query 分类**：为查询附加类型标签，检索时按类型过滤：
+
+```json
+{"query": "房颤卒中为什么考虑心源性?", "type": "etiology"}
+```
+
+### 5.10.6 第四优先级：Hybrid Retrieval
+
+不要只使用 Vector Search。推荐架构：
+
+```
+Query → Query Rewrite → [BM25 关键词] + [Vector 语义] → Hybrid Merge → Reranker → Final Evidence
+```
+
+| 检索方式 | 优势 | 劣势 |
+|----------|------|------|
+| BM25 | 医学专有名词精准匹配（TOAST/NIHSS/alteplase） | 无法理解语义变体 |
+| Vector | 语义泛化（"突然失语右侧瘫痪"→"优势半球MCA综合征"） | 专业缩写不敏感 |
+
+> Hybrid Retrieval 的工程实现细节见 5.5 节。
+
+### 5.10.7 第五优先级：增加 Reranker
+
+Embedding top20 → 直接 top5 排序不够精准。推荐加入 Cross Encoder：
+
+```
+Vector Search top50 → BGE-reranker → top5 → LLM
+```
+
+推荐模型：BAAI/bge-reranker-large、bge-reranker-v2-m3、jina-reranker
+
+> Reranker 的容灾切换机制见 5.5.3 节。
+
+### 5.10.8 第六优先级：Metadata Filtering
+
+根据临床阶段过滤检索范围：
+
+| 用户问题 | 过滤条件 |
+|----------|----------|
+| 是否溶栓 | category=treatment, topic=thrombolysis, stage=emergency |
+| 为什么失语 | category=anatomy, topic=MCA |
+
+### 5.10.9 第七优先级：垃圾 Chunk 清洗
+
+知识库中的目录、参考文献、版权页、重复内容进入 embedding 后会污染召回。
+
+**Chunk Quality Filter**：
+
+| 操作 | 规则 |
+|------|------|
+| 删除 | 字数<100、大量数字、参考文献格式、目录、重复文本、无医学实体 |
+| 保留 | 疾病定义、诊断标准、治疗推荐、风险因素、证据等级 |
+
+### 5.10.10 第八优先级：建立 Evidence Hierarchy
+
+不同问题需要不同等级的证据：
+
+| 问题类型 | 优先证据 | 禁止返回 |
+|----------|----------|----------|
+| 治疗问题 | Guideline / RCT / Meta-analysis | 教材 |
+| 诊断问题 | Guideline / 诊断标准 | 病例报告 |
+| 解剖定位 | 教材 / 解剖图谱 | 指南 |
+
 
 # 六、RAG评估
 
