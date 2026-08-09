@@ -3439,3 +3439,243 @@ IntentNode (Qwen-Turbo 意图识别)
 | RAGAS 自动评测 | 六、RAG 评估 | 事实一致性、回答相关性、上下文精准度量化追踪 |
 | SSE 流式推送 | 三、LangGraph → Streaming | node_start / node_done / token / done 标准事件流 |
 | FHIR 标准输出 | —（本章新增实践） | FHIR Bundle（Composition + Patient + Observation），对接 HIS 系统 |
+
+## 8.9 循证检索流程设计
+
+> 本节详细描述脑卒中 CDSS 的循证检索流程架构，是 8.5.1 节 Agentic RAG 的工程落地细节。
+
+### 8.9.1 整体架构
+
+```
+用户输入
+  ↓
+Clinical Decision Planner（临床决策规划器）
+  ↓ PICO 结构化问题
+Evidence Router Agent（证据路由智能体）
+  ↓ 路由到对应 Collection
+Medical Query Translator（医学查询翻译器）
+  ↓ 生成多路检索查询
+HybridRetriever（混合检索器）
+  ↓ BM25 + Vector + RRF 融合
+Evidence Mismatch Filter（证据错配过滤器）
+  ↓ 过滤不相关证据
+Evidence Grader（证据评分器）
+  ↓ 评分不足 → Query Rewrite → 重新检索
+最终证据集 → LLM 推理
+```
+
+### 8.9.2 Clinical Decision Planner（临床决策规划器）
+
+将用户自由文本输入转化为结构化 PICO 查询：
+
+```python
+class PICOQuestion(BaseModel):
+    P: str  # Patient/Population - 患者特征
+    I: str  # Intervention - 干预/检查
+    C: str  # Comparison - 对照
+    O: str  # Outcome - 目标结局
+    question_type: str  # diagnosis/treatment/prognosis/etiology
+    urgency: str  # emergency/routine
+```
+
+示例：
+
+```
+输入: "72岁男性 房颤 突发失语 右偏瘫 NIHSS 18分"
+  → P: 72岁男性, 房颤, 急性神经功能缺损
+  → I: CTA评估, 溶栓评估
+  → C: 无
+  → O: 血管再通, 神经功能改善
+  → question_type: treatment
+  → urgency: emergency
+```
+
+### 8.9.3 Evidence Router Agent（证据路由智能体）
+
+根据 PICO 问题类型路由到对应的 Collection：
+
+| question_type | 路由目标 | 说明 |
+|---------------|----------|------|
+| diagnosis | guideline + textbook | 诊断标准 + 解剖定位 |
+| treatment | guideline + RCT | 治疗推荐 + 临床试验 |
+| etiology | guideline + textbook | 病因分类 + 病理机制 |
+| prognosis | guideline + cohort | 预后评分 + 队列研究 |
+| emergency | emergency_protocol | 绿道流程 + 时间窗 |
+
+### 8.9.4 Medical Query Translator（医学查询翻译器）
+
+将 PICO 结构化查询翻译为多路检索查询，包含五个子步骤：
+
+**1. 查询抽象化（Query Abstraction）**
+
+```
+原始: "72岁男性 房颤 突发失语"
+  → 抽象: "acute ischemic stroke, cardioembolic, dominant hemisphere"
+```
+
+**2. 同义词扩展（Synonym Expansion）**
+
+```
+"脑梗" → ["脑梗", "脑梗死", "缺血性卒中", "cerebral infarction", "ischemic stroke"]
+```
+
+**3. OR-AND 范式转换**
+
+```
+PICO: P=房颤+卒中, I=抗凝
+  → BM25: (房颤 OR atrial_fibrillation) AND (卒中 OR stroke) AND (抗凝 OR anticoagulation)
+  → Vector: "房颤相关卒中患者的抗凝治疗指征与时机"
+```
+
+**4. 来源约束（Source Constraint）**
+
+```
+question_type=treatment → source_weight: guideline=3, RCT=2, textbook=1
+```
+
+**5. 查询变体生成（Query Variant Generation）**
+
+```
+Q1: 中文完整查询 → Vector Search
+Q2: 英文翻译查询 → Vector Search（覆盖英文文献）
+Q3: 关键词组合 → BM25 Search
+Q4: PICO 各字段独立查询 → 补充召回
+```
+
+**中文优先策略**：由于知识库以中文为主，中文查询权重 > 英文查询权重。
+
+### 8.9.5 HybridRetriever（混合检索器）
+
+```
+Q1(中文) → Vector → top20
+Q2(英文) → Vector → top10
+Q3(关键词) → BM25 → top20
+Q4(PICO) → Vector → top10
+  ↓
+RRF 融合 → top50
+  ↓
+Reranker → top10
+```
+
+> RRF 融合与 Reranker 的工程细节见 5.5 节。
+
+### 8.9.6 Evidence Mismatch Filter（证据错配过滤器）
+
+检索后过滤与问题不匹配的证据：
+
+| 过滤规则 | 示例 |
+|----------|------|
+| 人口不匹配 | 问"老年"，返回"儿童"→ 过滤 |
+| 阶段不匹配 | 问"急性期"，返回"康复期"→ 过滤 |
+| 证据类型不匹配 | 问"治疗"，返回"流行病学"→ 过滤 |
+
+### 8.9.7 Retrieval Failure Recovery（检索失败恢复）
+
+当检索结果为空或质量极低时：
+
+```
+检索结果为空
+  ↓
+1. 放宽过滤条件（移除 stage 约束）
+  ↓ 仍为空
+2. 扩大检索范围（增加 Collection）
+  ↓ 仍为空
+3. 降级到通用医学知识检索
+  ↓ 仍为空
+4. 返回"未找到相关证据" + 建议人工查阅
+```
+
+### 8.9.8 Evidence Grader + Query Rewrite Loop
+
+```
+检索结果 → Evidence Grader 评分
+  ↓
+分数 ≥ 阈值 → 通过，进入 LLM 推理
+分数 < 阈值 → Query Rewrite → 重新检索（最多 3 轮）
+```
+
+**Evidence Grader 评分维度**：
+
+| 维度 | 权重 | 说明 |
+|------|------|------|
+| Relevance | 0.3 | 与查询的相关性 |
+| Specificity | 0.25 | 证据的具体性 |
+| Recency | 0.15 | 证据的时效性 |
+| Source Quality | 0.15 | 来源质量（指南>RCT>综述） |
+| Completeness | 0.15 | 证据的完整性 |
+
+**Query Rewrite 策略**：
+
+```
+第1轮失败 → 简化查询（移除次要约束）
+第2轮失败 → 换用同义词
+第3轮失败 → 放弃检索，使用模型知识
+```
+
+### 8.9.9 知识库结构
+
+**5 个 Collection**：
+
+| Collection | 内容 | Chunk 策略 |
+|------------|------|------------|
+| guideline | 临床指南 | 按推荐等级切分 |
+| textbook | 医学教材 | 按章节切分 |
+| RCT | 随机对照试验 | 按结论切分 |
+| emergency_protocol | 急诊流程 | 按步骤切分 |
+| shared_memory | 共享记忆 | 按会话切分 |
+
+**Chunk Metadata Schema**：
+
+```json
+{
+  "source": "中国急性缺血性卒中诊治指南2023",
+  "section": "急性期治疗",
+  "subsection": "静脉溶栓",
+  "evidence_level": "I级推荐",
+  "population": "AIS",
+  "stage": "acute",
+  "chunk_type": "recommendation",
+  "page": 15
+}
+```
+
+### 8.9.10 完整检索示例
+
+```
+用户: "房颤卒中患者什么时候启动抗凝？"
+
+1. Clinical Decision Planner:
+   P=房颤+卒中, I=抗凝启动, C=无, O=出血风险vs复发预防
+   question_type=treatment, urgency=routine
+
+2. Evidence Router:
+   → guideline + RCT
+
+3. Query Translator:
+   Q1(Vector): "房颤相关缺血性卒中抗凝治疗启动时机"
+   Q2(Vector): "anticoagulation timing after cardioembolic stroke"
+   Q3(BM25): (房颤 OR atrial_fibrillation) AND (卒中 OR stroke) AND (抗凝 OR anticoagulation) AND (时机 OR timing)
+   Q4(PICO): PICO各字段独立查询
+
+4. HybridRetriever:
+   Q1→top20, Q2→top10, Q3→top20, Q4→top10
+   → RRF → top50 → Reranker → top10
+
+5. Mismatch Filter:
+   移除: 儿童房颤、心脏瓣膜病相关、康复期抗凝
+
+6. Evidence Grader:
+   评分 0.82 ≥ 阈值 0.6 → 通过
+
+7. 输出: 10条高质量证据 → LLM 推理
+```
+
+### 8.9.11 设计原则
+
+| 原则 | 体现 |
+|------|------|
+| 分而治之 | PICO → Router → Translator → Retriever，每步只做一件事 |
+| 渐进降级 | 检索失败时逐步放宽约束，而非直接放弃 |
+| 证据分级 | 不同问题类型路由到不同证据源 |
+| 中文优先 | 知识库以中文为主，查询翻译保持中文权重 |
+| 有界循环 | Query Rewrite 最多 3 轮，避免无限循环 |
